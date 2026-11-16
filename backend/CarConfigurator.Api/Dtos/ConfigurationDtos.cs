@@ -38,6 +38,10 @@ public class LayerPreviewDto
 public class ConfigurationEvaluationResultDto
 {
     public bool IsValid { get; set; }
+    public bool HasInvalidInput { get; set; }
+    public bool CanSave { get; set; }
+    public int? EngineOptionId { get; set; }
+    public List<int> SelectedOptionIds { get; set; } = new();
     public decimal BasePrice { get; set; }
     public decimal OptionsPrice { get; set; }
     public decimal DiscountAmount { get; set; }

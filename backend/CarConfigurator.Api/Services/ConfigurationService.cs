@@ -33,6 +33,17 @@ public class ConfigurationService : IConfigurationService
         public const int HeatedWindshield = 62;
     }
 
+    public static class ErrorCodes
+    {
+        public const string MissingEngine = "MISSING_ENGINE";
+        public const string InvalidEngineId = "INVALID_ENGINE_ID";
+        public const string InvalidOptionId = "INVALID_OPTION_ID";
+        public const string DuplicateOptions = "DUPLICATE_OPTIONS";
+        public const string EmptyConfigurationName = "EMPTY_CONFIGURATION_NAME";
+        public const string DependencyMissing = "DEPENDENCY_MISSING";
+        public const string ExclusionConflict = "EXCLUSION_CONFLICT";
+    }
+
     private readonly List<CarOption> _options;
     private readonly List<OptionRule> _rules;
     private readonly List<PackageDiscount> _discounts;
@@ -62,52 +73,103 @@ public class ConfigurationService : IConfigurationService
     {
         var result = new ConfigurationEvaluationResultDto
         {
-            IsValid = true
+            IsValid = true,
+            HasInvalidInput = false,
+            CanSave = false,
+            EngineOptionId = request?.EngineOptionId,
+            SelectedOptionIds = request?.SelectedOptionIds != null
+                ? new List<int>(request.SelectedOptionIds)
+                : new List<int>()
         };
 
-        // 1. Bemeneti adatok strukturális validációja (Elfogadási feltétel #5 váz)
+        // 1. Bemeneti adatok strukturális validációja (Elfogadási feltétel #5)
         if (!ValidateInput(request, result))
         {
+            result.HasInvalidInput = true;
             result.IsValid = false;
+            result.CanSave = false;
             return result;
         }
 
-        var engineOption = _options.First(o => o.Id == request.EngineOptionId!.Value);
-        var selectedOptions = request.SelectedOptionIds
+        var engineOption = _options.First(o => o.Id == request!.EngineOptionId!.Value);
+        var selectedIds = request!.SelectedOptionIds ?? new List<int>();
+        var selectedOptions = selectedIds
             .Select(id => _options.First(o => o.Id == id))
             .ToList();
 
-        var allSelectedIds = new HashSet<int>(request.SelectedOptionIds) { engineOption.Id };
+        var allSelectedIds = new HashSet<int>(selectedIds) { engineOption.Id };
 
-        // 2. Függőségi szabályok ellenőrzése (Elfogadási feltétel #2 váz)
+        // 2. Függőségi szabályok ellenőrzése (Elfogadási feltétel #2)
         CheckDependencies(allSelectedIds, result);
 
-        // 3. Kizárási szabályok ellenőrzése - nem töröl némán opciót! (Elfogadási feltétel #3 váz)
+        // 3. Kizárási szabályok ellenőrzése - nem töröl némán opciót! (Elfogadási feltétel #3 és AGENTS.md 6. pont)
         CheckExclusions(allSelectedIds, result);
 
         // 4. Alapár és opciók árának számítása (Elfogadási feltétel #1)
         result.BasePrice = engineOption.Price;
         result.OptionsPrice = selectedOptions.Sum(o => o.Price);
 
-        // 5. Csomagkedvezmények kalkulációja (Elfogadási feltétel #4 váz)
+        // 5. Csomagkedvezmények kalkulációja (Elfogadási feltétel #4)
         result.DiscountAmount = CalculateDiscounts(allSelectedIds, selectedOptions, result);
 
         result.TotalPrice = result.BasePrice + result.OptionsPrice - result.DiscountAmount;
-        result.IsValid = result.Errors.Count == 0;
+        result.IsValid = result.Errors.Count == 0 && !result.HasInvalidInput;
+        result.CanSave = result.IsValid;
 
-        // 6. 2D vizuális rétegek összeállítása z-index szerint rendezve (Elfogadási feltétel #7 váz)
+        // 6. 2D vizuális rétegek összeállítása z-index szerint rendezve (Elfogadási feltétel #7)
         result.VisualLayers = BuildVisualLayers(selectedOptions);
 
         return result;
     }
 
-    protected virtual bool ValidateInput(ConfigurationRequestDto request, ConfigurationEvaluationResultDto result)
+    public ConfigurationEvaluationResultDto ValidateSaveRequest(SaveConfigurationRequestDto request)
+    {
+        if (request == null)
+        {
+            return new ConfigurationEvaluationResultDto
+            {
+                IsValid = false,
+                HasInvalidInput = true,
+                CanSave = false,
+                Errors = new List<ValidationIssueDto>
+                {
+                    new ValidationIssueDto
+                    {
+                        Code = ErrorCodes.EmptyConfigurationName,
+                        Message = "A mentési kérés nem lehet üres."
+                    }
+                }
+            };
+        }
+
+        var evalResult = EvaluateConfiguration(new ConfigurationRequestDto
+        {
+            EngineOptionId = request.EngineOptionId,
+            SelectedOptionIds = request.SelectedOptionIds ?? new List<int>()
+        });
+
+        if (string.IsNullOrWhiteSpace(request.Name))
+        {
+            evalResult.Errors.Add(new ValidationIssueDto
+            {
+                Code = ErrorCodes.EmptyConfigurationName,
+                Message = "A konfiguráció mentéséhez kötelező nevet megadni."
+            });
+            evalResult.HasInvalidInput = true;
+            evalResult.IsValid = false;
+            evalResult.CanSave = false;
+        }
+
+        return evalResult;
+    }
+
+    protected virtual bool ValidateInput(ConfigurationRequestDto? request, ConfigurationEvaluationResultDto result)
     {
         if (request == null || !request.EngineOptionId.HasValue)
         {
             result.Errors.Add(new ValidationIssueDto
             {
-                Code = "MISSING_ENGINE",
+                Code = ErrorCodes.MissingEngine,
                 Message = "A motor kiválasztása kötelező."
             });
             return false;
@@ -118,7 +180,7 @@ public class ConfigurationService : IConfigurationService
         {
             result.Errors.Add(new ValidationIssueDto
             {
-                Code = "INVALID_ENGINE_ID",
+                Code = ErrorCodes.InvalidEngineId,
                 Message = $"Érvénytelen motor azonosító: {request.EngineOptionId.Value}.",
                 AffectedOptionIds = new List<int> { request.EngineOptionId.Value }
             });
@@ -128,10 +190,17 @@ public class ConfigurationService : IConfigurationService
         var selectedIds = request.SelectedOptionIds ?? new List<int>();
         if (selectedIds.Distinct().Count() != selectedIds.Count)
         {
+            var duplicates = selectedIds
+                .GroupBy(id => id)
+                .Where(g => g.Count() > 1)
+                .Select(g => g.Key)
+                .ToList();
+
             result.Errors.Add(new ValidationIssueDto
             {
-                Code = "DUPLICATE_OPTIONS",
-                Message = "A kiválasztott opciók között duplikáció található."
+                Code = ErrorCodes.DuplicateOptions,
+                Message = "A kiválasztott opciók között duplikáció található.",
+                AffectedOptionIds = duplicates
             });
             return false;
         }
@@ -142,7 +211,7 @@ public class ConfigurationService : IConfigurationService
             {
                 result.Errors.Add(new ValidationIssueDto
                 {
-                    Code = "INVALID_OPTION_ID",
+                    Code = ErrorCodes.InvalidOptionId,
                     Message = $"Nem létező vagy érvénytelen opció azonosító: {id}.",
                     AffectedOptionIds = new List<int> { id }
                 });
@@ -161,7 +230,7 @@ public class ConfigurationService : IConfigurationService
             {
                 result.Errors.Add(new ValidationIssueDto
                 {
-                    Code = "DEPENDENCY_MISSING",
+                    Code = ErrorCodes.DependencyMissing,
                     Message = rule.ErrorMessage,
                     AffectedOptionIds = new List<int> { rule.SourceOptionId, rule.TargetOptionId }
                 });
@@ -177,7 +246,7 @@ public class ConfigurationService : IConfigurationService
             {
                 result.Errors.Add(new ValidationIssueDto
                 {
-                    Code = "EXCLUSION_CONFLICT",
+                    Code = ErrorCodes.ExclusionConflict,
                     Message = rule.ErrorMessage,
                     AffectedOptionIds = new List<int> { rule.SourceOptionId, rule.TargetOptionId }
                 });

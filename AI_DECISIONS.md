@@ -26,3 +26,30 @@ Az `AGENTS.md` és a `SPECIFICATION.md` elolvasása után ellenőrizni kellett, 
 - **Elvetett alternatíva 1 – Beégetett (`if-else`) validációs logika az egyes opciókra:** Bár kezdetben rövidebb kódot eredményezett volna, egy későbbi módosítási igénynél (új opció vagy új csomagkedvezmény) a szolgáltatás belső vezérlési logikáját kellett volna átírni, növelve a regressziós hibák kockázatát.
 - **Elvetett alternatíva 2 – Ütköző opciók automatikus kivétele a listából:** A `SPECIFICATION.md` 4. pontja és az `AGENTS.md` 6. pontja kifejezetten tiltja a néma törlést; a felhasználónak látnia kell az ütközési hibát (`IsValid = false`), és a mentést kell blokkolni a feloldásig.
 - **Elvetett alternatíva 3 – Domain entitások közvetlen visszaadása az API-ból DTO-k nélkül:** Sértené az `AGENTS.md` 4. pontjában előírt tiszta rétegződést, és megnehezítené a mentések visszatöltésekor kötelező újra-validálási eredmények strukturált átadását a frontendnek.
+
+
+---
+
+## 2. Döntési eset: Üzleti szabályok (Függőség, Kizárás, Téli csomag kedvezmény), strukturális vs. üzleti hibák szétválasztása és xUnit határeset-tesztelés
+
+### 2.1. A kiadott feladat / prompt lényege
+A `SPECIFICATION.md` 2., 3., 4. és 5. elfogadási feltételeinek maradéktalan implementálása a `ConfigurationService`-ben:
+- Függőségek ellenőrzése („Prémium hangrendszer” kizárólag „Nagy navigáció” mellett érvényes).
+- Kizárások ellenőrzése („Alap motor” + „Sportfutómű”, valamint „Sport diffúzor” + „Vonóhorog” ütközése, az opciók néma törlése nélkül).
+- „Téli csomag” 20%-os csomagkedvezményének számítása (mindhárom elem meglétekor 80 000 Ft kedvezmény, bármelyik kivételekor 0 Ft kedvezmény és teljes árú elszámolás).
+- Bemeneti validáció hibás DTO-kra (hiányzó motor-ID, `-1` opció-ID, duplikációk, üres mentési név) és mindezek lefedése xUnit határeset- és hibatesztekkel.
+
+### 2.2. Meghozott architekturális és technikai döntések (és indoklásuk)
+1. **Strukturális bemeneti hibák (`HasInvalidInput`) és üzleti szabályütközések (`IsValid` / `CanSave`) explicitté tétele a `ConfigurationEvaluationResultDto`-ban:**
+   - Bevezettük a `HasInvalidInput` és a `CanSave` jelzőket, valamint a `ValidateSaveRequest(SaveConfigurationRequestDto)` metódust és a tipizált `ConfigurationService.ErrorCodes` konstansokat (`MISSING_ENGINE`, `INVALID_ENGINE_ID`, `INVALID_OPTION_ID`, `DUPLICATE_OPTIONS`, `EMPTY_CONFIGURATION_NAME`, `DEPENDENCY_MISSING`, `EXCLUSION_CONFLICT`).
+   - **Miért:** A `SPECIFICATION.md` különbséget tesz a strukturálisan hibás API kérések (5. elfogadási feltétel: `400 Bad Request`, mentés nélkül) és a felhasználói konfigurálás közben fellépő üzleti ütközések (2. és 3. elfogadási feltétel: érvénytelen konfigurációs állapot `IsValid = false`, ahol az API válasz maga érvényes kiértékelési eredményt ad vissza a frontendnek, de a mentést letiltja: `CanSave = false`) között.
+2. **Néma törlés tilalmának garantálása állapotmegőrzéssel (`SelectedOptionIds` visszaadása):**
+   - A `ConfigurationEvaluationResultDto` változatlan formában visszaadja a bemeneti `SelectedOptionIds` listát még akkor is, ha kizárási ütközés (`EXCLUSION_CONFLICT`) lép fel (pl. „Alap motor” és „Sportfutómű” együttes választásakor).
+   - **Miért:** Az `AGENTS.md` 6. pontja szigorúan előírja, hogy motor- vagy opciócserénél a rendszer nem törölheti némán az érvénytelenné vált opciót; ezt külön xUnit assert (`Assert.Contains(SportSuspension, result.SelectedOptionIds)`) is ellenőrzi.
+3. **Paraméterezett (`[Theory]` / `[InlineData]`) xUnit határeset-tesztek a Téli csomag részleges kiválasztására:**
+   - A 4. elfogadási feltétel előírja, hogy a „Téli csomag” (Ülésfűtés: 150e, Kormányfűtés: 100e, Fűthető szélvédő: 150e Ft) *bármelyik* elemének kivételekor a 20%-os kedvezmény megszűnik.
+   - **Miért:** Egyetlen önkényes részhalmaz tesztelése helyett `[Theory]` teszttel mindhárom lehetséges 2-elemű kombinációt (150e+100e=250e, 150e+150e=300e, 100e+150e=250e) automatizáltan ellenőriztük.
+
+### 2.3. Elvetett alternatívák
+- **Elvetett alternatíva 1 – Kivétel (`ArgumentException`) dobása minden bemeneti és üzleti hibára:** Ha a `ConfigurationService` kivételt dobna függőségi vagy kizárási ütközéskor, a kontrollernek try-catch blokkokból kellene rekonstruálnia a részletes validációs hibalistát és az aktuális árat. A strukturált eredmény-DTO (`ConfigurationEvaluationResultDto`) sokkal tisztább, tesztelhetőbb vezérlést ad.
+- **Elvetett alternatíva 2 – A mentési név validációjának kizárólag Controller attribútumra (`[Required]`) bízása:** Bár az ASP.NET Core modellvalidáció is képes `400 Bad Request`-et adni, az üzleti rétegbe (`ValidateSaveRequest`) emelve a szabály közvetlenül, HTTP pipeline indítása nélkül is 100%-ban tesztelhető xUnitból az 5. elfogadási feltétel szerint.
