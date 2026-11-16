@@ -60,3 +60,42 @@ A total of 1 test files matched the specified pattern.
 
 Passed!  - Failed:     0, Passed:    16, Skipped:     0, Total:    16, Duration: 70 ms - CarConfigurator.Tests.dll (net10.0)
 ```
+
+
+---
+
+## 3. futtatás – Review Agent visszajelzések javítása utáni teljes xUnit tesztcsomag (1–7. elfogadási feltételek)
+
+- **Dátum:** 2026-11-17
+- **Branch:** `agent`
+- **Parancs:** `dotnet test --no-restore`
+- **Cél:** A független Review Agent által feltárt összes validációs kiskapu, jogosultsági/CRUD szabály (400/401/403), visszatöltéskori újra-validálás és 2D réteg-rendezés ellenőrzése.
+
+### Újonnan hozzáadott / bővített tesztesetek (`ConfigurationServiceTests` – összesen 33 teszteset)
+- **Többszörös egyidejű üzleti szabályütközés:**
+  - `EvaluateConfiguration_SimultaneousDependencyAndExclusionConflicts_ReturnsBothErrors` – **PASSED**
+- **Téli csomag (4. elfogadási feltétel) peremtesztek és motor-komponensű csomag:**
+  - `EvaluateConfiguration_SingleWinterPackageItemSelected_NoDiscountApplied` (3× `[InlineData]`) – **PASSED**
+  - `EvaluateConfiguration_FullWinterPackagePlusOtherPaidOptions_AppliesDiscountOnlyToWinterPackageItems` – **PASSED**
+  - `EvaluateConfiguration_PackageDiscountIncludingEngineOption_IncludesEnginePriceInDiscountCalculation` – **PASSED**
+- **Bemeneti validáció, kategória-kardinalitás és nem-rövidzáras hibagyűjtés (5. elfogadási feltétel):**
+  - `EvaluateConfiguration_InvalidOrNonEngineIdPassedAsEngine_ReturnsInvalidEngineIdError` (3× `[InlineData]`: `-1`, `999`, `MetallicColor`) – **PASSED**
+  - `EvaluateConfiguration_EngineIdPassedInSelectedOptions_ReturnsEngineInSelectedOptionsError` – **PASSED**
+  - `EvaluateConfiguration_MultipleInvalidInputs_CollectsAllStructuralErrorsWithoutShortCircuiting` – **PASSED**
+  - `EvaluateConfiguration_MultipleColorsOrRimsOrInteriorsSelected_ReturnsMultipleCategorySelectionError` – **PASSED**
+  - `ValidateSaveRequest_NullRequestOrNameTooLong_ReturnsAppropriateInputErrors` – **PASSED**
+- **Jogosultságkezelés (401/403), CRUD és visszatöltéskori újra-validálás (5. és 6. elfogadási feltétel):**
+  - `Controller_GuestSaveAttempt_Returns401Unauthorized` – **PASSED**
+  - `Controller_OtherUserAccessModifyOrDelete_Returns403Forbidden` – **PASSED**
+  - `Controller_SaveInvalidOrConflictingConfiguration_Returns400BadRequestWithoutSaving` – **PASSED**
+  - `GetSavedConfigurationById_ReloadAfterPriceAndRuleChange_PreservesSavedPriceAndRevalidates` – **PASSED**
+- **2D vizuális rétegek szűrése és `ZIndex` sorrendje (7. elfogadási feltétel):**
+  - `EvaluateConfiguration_VisualLayers_ExcludesInteriorAndExtrasAndOrdersByZIndexAscending` – **PASSED**
+
+### Konzol kimenet (Summary)
+```text
+Test run for backend\CarConfigurator.Tests\bin\Debug\net10.0\CarConfigurator.Tests.dll (.NETCoreApp,Version=v10.0)
+A total of 1 test files matched the specified pattern.
+
+Passed!  - Failed:     0, Passed:    33, Skipped:     0, Total:    33, Duration: 124 ms - CarConfigurator.Tests.dll (net10.0)
+```

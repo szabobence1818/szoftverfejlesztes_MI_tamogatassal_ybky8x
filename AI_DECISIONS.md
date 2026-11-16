@@ -131,3 +131,28 @@ A jelenlegi 12 teszt (`14 lefutott teszteset` a `[Theory]`-val együtt) nem fedi
 6. **2D Vizuális rétegek (7. elfogadási feltétel) backend szűrési és sorrendiségi tesztje:**
    - Annak tesztelése, hogy belső (`LeatherInterior`) és extra (`LargeNavigation`, `HeatedSeats`) opciók kiválasztásakor azok **nem** jelennek meg a `VisualLayers` listában, míg a 4 külső réteg (`ExteriorColor` z=10, `SportDiffuser` z=20, `TowHook` z=25, `Rim` z=30) szigorúan növekvő `ZIndex` sorrendben érkezik vissza.
 
+
+---
+
+## 4. Döntési eset: A független Review Agent által feltárt validációs kiskapuk, jogosultsági/perzisztencia hiányosságok és határeset-tesztek javítása (Minőségbiztosítási döntés)
+
+### 4.1. A kiadott feladat / prompt lényege
+A független Review Agent által a `REVIEW_PROTOCOL.md` és a `SPECIFICATION.md` alapján végzett kódvizsgálat (3. Döntési eset) 5 konkrét backend validációs/architekturális hibát és 6 hiányzó xUnit tesztkategóriát tárt fel. Feladatunk ezen hibák teljes körű kijavítása a backendben, a hiányzó perzisztencia-, jogosultság- és Controller-réteg pótlása, az összes hiányzó határeset-teszt megírása, valamint a minőségbiztosítási visszacsatolás dokumentálása.
+
+### 4.2. Meghozott minőségbiztosítási és architekturális döntések (és indoklásuk)
+1. **Egyszeres választású kategóriák (`ExteriorColor`, `Rim`, `Interior`) kardinalitás-validációja (`MULTIPLE_CATEGORY_SELECTION`):**
+   - A `ConfigurationService.ValidateInput` metódusban bevezettük a `SingleChoiceCategories` halmazt (`ExteriorColor`, `Rim`, `Interior`). Ha a kliens egyazon kategóriából egynél több opciót küld be (pl. egyszerre két színt vagy két felnit), a rendszer `MULTIPLE_CATEGORY_SELECTION` hibakódot ad vissza az érintett opció-ID-kkal, és megakadályozza az érvénytelen konfiguráció mentését (`IsValid = false`, `HasInvalidInput = true`, `CanSave = false`).
+   - **Miért:** Ezzel bezártuk azt a kritikus kiskaput, amelynél több fényezés vagy felni ára összeadódhatott, és azonos `ZIndex`-ű ütköző 2D rétegek kerülhettek a `VisualLayers` listába.
+2. **Nem-rövidzáras (non-short-circuit) bemeneti validáció és pontosított hibakódok (`NULL_REQUEST`, `ENGINE_IN_SELECTED_OPTIONS`, `CONFIGURATION_NAME_TOO_LONG`):**
+   - Átalakítottuk a `ValidateInput` metódust úgy, hogy az első strukturális hibánál nem lép ki (`return false`), hanem végigvizsgálja a teljes kérést (motor megléte/érvényessége, duplikációk, minden egyes érvénytelen opció-ID a `SelectedOptionIds`-ben, motor-kategória tiltása az extrák között, kategória-kardinalitás).
+   - Emellett a `ValidateSaveRequest(null)` mostantól dedikált `NULL_REQUEST` hibakódot ad, és ellenőrzi a mentési név 100 karakteres maximális hosszát (`CONFIGURATION_NAME_TOO_LONG`).
+3. **Csomagkedvezmény (`CalculateDiscounts`) kiterjesztése a teljes kiválasztott opcióhalmazra (`allSelectedOptions`):**
+   - A `CalculateDiscounts` mostantól a motort is tartalmazó `allSelectedOptions` listán számolja a csomag részösszegét (`packageSum`), így a jogosultság-ellenőrzés (`allSelectedIds`) és az árszámítás alapja 100%-ban konzisztens maradt egy esetleges Mérföldkő 3-as (motort is magában foglaló) csomagkedvezmény esetére is.
+4. **Repository réteg (`IConfigurationRepository` / `InMemoryConfigurationRepository`), `ConfigurationsController` és jogosultságkezelés (`400` / `401` / `403`) bevezetése + Visszatöltéskori újra-validálás:**
+   - Létrehoztuk a szálbiztos `InMemoryConfigurationRepository`-t, a `ServiceResult<T>` eredményburkolót és a `ConfigurationsController` REST végpontokat (`GET /api/configurations/options`, `POST /api/configurations/evaluate`, `POST /api/configurations`, `GET /api/configurations`, `GET /api/configurations/{id}`, `PUT /api/configurations/{id}`, `DELETE /api/configurations/{id}`).
+   - **Jogosultság (6. elfogadási feltétel):** Vendég (`currentUserId == null`) mentési vagy lekérési kísérlete `401 Unauthorized` választ ad; más felhasználó mentésének lekérése, módosítása vagy törlése `403 Forbidden` választ ad.
+   - **Visszatöltéskori újra-validálás (`AGENTS.md` 6. pont és `SPECIFICATION.md` 4. pont):** A `MapToDtoWithRevalidation` minden lekéréskor újra lefuttatja az `EvaluateConfiguration`-t a tárolt opciókon, így a `SavedConfigurationDto` egyszerre tartalmazza a mentéskori `SavedTotalPrice` értéket és az aktuális szabályok/árak szerinti `CurrentEvaluation` eredményt.
+
+### 4.3. Elvetett alternatívák
+- **Elvetett alternatíva 1 – Jogosultság-ellenőrzés kizárólag Controller szinten:** Ha a `401`/`403` ellenőrzés csak a Controllerben lenne, akkor a `ConfigurationService` közvetlen hívásakor megkerülhető lenne a védelem. A `ServiceResult<T>`-vel a jogosultsági szabályok a szolgáltatásrétegben és a Controllerben egyaránt kikényszerítettek és tesztelhetők.
+- **Elvetett alternatíva 2 – Mentett konfigurációk visszatöltése újra-validálás nélkül (csak a mentéskori állapot visszaadása):** Sértené a `SPECIFICATION.md` 4. pontját és az `AGENTS.md` 6. pontját; ha időközben változik egy opció ára vagy bekerül egy új kizárási szabály, a felhasználónak visszatöltéskor látnia kell a frissített árat és az esetleges új ütközést.

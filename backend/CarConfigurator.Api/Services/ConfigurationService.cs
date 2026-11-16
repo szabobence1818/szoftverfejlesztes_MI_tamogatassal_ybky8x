@@ -1,10 +1,20 @@
 using CarConfigurator.Api.Dtos;
 using CarConfigurator.Api.Models;
+using CarConfigurator.Api.Repositories;
 
 namespace CarConfigurator.Api.Services;
 
 public class ConfigurationService : IConfigurationService
 {
+    public const int MaxConfigurationNameLength = 100;
+
+    private static readonly HashSet<OptionCategory> SingleChoiceCategories = new()
+    {
+        OptionCategory.ExteriorColor,
+        OptionCategory.Rim,
+        OptionCategory.Interior
+    };
+
     public static class OptionIds
     {
         public const int BaseEngine = 1;
@@ -35,11 +45,15 @@ public class ConfigurationService : IConfigurationService
 
     public static class ErrorCodes
     {
+        public const string NullRequest = "NULL_REQUEST";
         public const string MissingEngine = "MISSING_ENGINE";
         public const string InvalidEngineId = "INVALID_ENGINE_ID";
         public const string InvalidOptionId = "INVALID_OPTION_ID";
+        public const string EngineInSelectedOptions = "ENGINE_IN_SELECTED_OPTIONS";
         public const string DuplicateOptions = "DUPLICATE_OPTIONS";
+        public const string MultipleCategorySelection = "MULTIPLE_CATEGORY_SELECTION";
         public const string EmptyConfigurationName = "EMPTY_CONFIGURATION_NAME";
+        public const string ConfigurationNameTooLong = "CONFIGURATION_NAME_TOO_LONG";
         public const string DependencyMissing = "DEPENDENCY_MISSING";
         public const string ExclusionConflict = "EXCLUSION_CONFLICT";
     }
@@ -47,9 +61,16 @@ public class ConfigurationService : IConfigurationService
     private readonly List<CarOption> _options;
     private readonly List<OptionRule> _rules;
     private readonly List<PackageDiscount> _discounts;
+    private readonly IConfigurationRepository _repository;
 
     public ConfigurationService()
+        : this(new InMemoryConfigurationRepository())
     {
+    }
+
+    public ConfigurationService(IConfigurationRepository repository)
+    {
+        _repository = repository ?? throw new ArgumentNullException(nameof(repository));
         _options = SeedDefaultOptions();
         _rules = SeedDefaultRules();
         _discounts = SeedDefaultDiscounts();
@@ -82,10 +103,9 @@ public class ConfigurationService : IConfigurationService
                 : new List<int>()
         };
 
-        // 1. Bemeneti adatok strukturális validációja (Elfogadási feltétel #5)
+        // 1. Bemeneti adatok strukturális és kategória-kardinalitási validációja (nem rövidzáras!)
         if (!ValidateInput(request, result))
         {
-            result.HasInvalidInput = true;
             result.IsValid = false;
             result.CanSave = false;
             return result;
@@ -98,6 +118,8 @@ public class ConfigurationService : IConfigurationService
             .ToList();
 
         var allSelectedIds = new HashSet<int>(selectedIds) { engineOption.Id };
+        var allSelectedOptions = new List<CarOption>(selectedOptions.Count + 1) { engineOption };
+        allSelectedOptions.AddRange(selectedOptions);
 
         // 2. Függőségi szabályok ellenőrzése (Elfogadási feltétel #2)
         CheckDependencies(allSelectedIds, result);
@@ -109,8 +131,8 @@ public class ConfigurationService : IConfigurationService
         result.BasePrice = engineOption.Price;
         result.OptionsPrice = selectedOptions.Sum(o => o.Price);
 
-        // 5. Csomagkedvezmények kalkulációja (Elfogadási feltétel #4)
-        result.DiscountAmount = CalculateDiscounts(allSelectedIds, selectedOptions, result);
+        // 5. Csomagkedvezmények kalkulációja a teljes kiválasztott opcióhalmazból (Elfogadási feltétel #4)
+        result.DiscountAmount = CalculateDiscounts(allSelectedIds, allSelectedOptions, result);
 
         result.TotalPrice = result.BasePrice + result.OptionsPrice - result.DiscountAmount;
         result.IsValid = result.Errors.Count == 0 && !result.HasInvalidInput;
@@ -124,7 +146,7 @@ public class ConfigurationService : IConfigurationService
 
     public ConfigurationEvaluationResultDto ValidateSaveRequest(SaveConfigurationRequestDto request)
     {
-        if (request == null)
+        if (request == null!)
         {
             return new ConfigurationEvaluationResultDto
             {
@@ -135,8 +157,8 @@ public class ConfigurationService : IConfigurationService
                 {
                     new ValidationIssueDto
                     {
-                        Code = ErrorCodes.EmptyConfigurationName,
-                        Message = "A mentési kérés nem lehet üres."
+                        Code = ErrorCodes.NullRequest,
+                        Message = "A mentési kérés nem lehet null."
                     }
                 }
             };
@@ -159,34 +181,224 @@ public class ConfigurationService : IConfigurationService
             evalResult.IsValid = false;
             evalResult.CanSave = false;
         }
+        else if (request.Name.Trim().Length > MaxConfigurationNameLength)
+        {
+            evalResult.Errors.Add(new ValidationIssueDto
+            {
+                Code = ErrorCodes.ConfigurationNameTooLong,
+                Message = $"A konfiguráció neve legfeljebb {MaxConfigurationNameLength} karakter lehet."
+            });
+            evalResult.HasInvalidInput = true;
+            evalResult.IsValid = false;
+            evalResult.CanSave = false;
+        }
 
         return evalResult;
     }
 
+    public ServiceResult<SavedConfigurationDto> SaveConfiguration(SaveConfigurationRequestDto request, string? currentUserId)
+    {
+        if (string.IsNullOrWhiteSpace(currentUserId))
+        {
+            return ServiceResult<SavedConfigurationDto>.Failure(401, "Vendég felhasználó nem menthet konfigurációt (401 Unauthorized).");
+        }
+
+        var validation = ValidateSaveRequest(request);
+        if (!validation.IsValid || !validation.CanSave)
+        {
+            return ServiceResult<SavedConfigurationDto>.Failure(
+                400,
+                "A konfiguráció érvénytelen vagy hibás bemeneti adatokat tartalmaz, ezért nem menthető.",
+                validation);
+        }
+
+        var entity = new SavedConfiguration
+        {
+            Name = request.Name.Trim(),
+            UserId = currentUserId,
+            EngineOptionId = request.EngineOptionId!.Value,
+            SelectedOptionIds = new List<int>(request.SelectedOptionIds),
+            SavedTotalPrice = validation.TotalPrice
+        };
+
+        var saved = _repository.Add(entity);
+        return ServiceResult<SavedConfigurationDto>.Success(MapToDtoWithRevalidation(saved), 201);
+    }
+
+    public ServiceResult<SavedConfigurationDto> GetSavedConfigurationById(int id, string? currentUserId)
+    {
+        if (string.IsNullOrWhiteSpace(currentUserId))
+        {
+            return ServiceResult<SavedConfigurationDto>.Failure(401, "Bejelentkezés szükséges a mentett konfigurációk megtekintéséhez (401 Unauthorized).");
+        }
+
+        var saved = _repository.GetById(id);
+        if (saved == null)
+        {
+            return ServiceResult<SavedConfigurationDto>.Failure(404, "A keresett konfiguráció nem található.");
+        }
+
+        if (!string.Equals(saved.UserId, currentUserId, StringComparison.Ordinal))
+        {
+            return ServiceResult<SavedConfigurationDto>.Failure(403, "Nincs jogosultság más felhasználó mentésének lekéréséhez (403 Forbidden).");
+        }
+
+        return ServiceResult<SavedConfigurationDto>.Success(MapToDtoWithRevalidation(saved), 200);
+    }
+
+    public ServiceResult<IReadOnlyList<SavedConfigurationDto>> GetUserConfigurations(string? currentUserId)
+    {
+        if (string.IsNullOrWhiteSpace(currentUserId))
+        {
+            return ServiceResult<IReadOnlyList<SavedConfigurationDto>>.Failure(401, "Bejelentkezés szükséges a mentett konfigurációk listázásához (401 Unauthorized).");
+        }
+
+        var items = _repository.GetByUserId(currentUserId)
+            .Select(MapToDtoWithRevalidation)
+            .ToList();
+
+        return ServiceResult<IReadOnlyList<SavedConfigurationDto>>.Success(items, 200);
+    }
+
+    public ServiceResult<SavedConfigurationDto> UpdateSavedConfiguration(int id, SaveConfigurationRequestDto request, string? currentUserId)
+    {
+        if (string.IsNullOrWhiteSpace(currentUserId))
+        {
+            return ServiceResult<SavedConfigurationDto>.Failure(401, "Bejelentkezés szükséges a konfiguráció módosításához (401 Unauthorized).");
+        }
+
+        var existing = _repository.GetById(id);
+        if (existing == null)
+        {
+            return ServiceResult<SavedConfigurationDto>.Failure(404, "A módosítani kívánt konfiguráció nem található.");
+        }
+
+        if (!string.Equals(existing.UserId, currentUserId, StringComparison.Ordinal))
+        {
+            return ServiceResult<SavedConfigurationDto>.Failure(403, "Nincs jogosultság más felhasználó mentésének módosításához (403 Forbidden).");
+        }
+
+        var validation = ValidateSaveRequest(request);
+        if (!validation.IsValid || !validation.CanSave)
+        {
+            return ServiceResult<SavedConfigurationDto>.Failure(
+                400,
+                "A módosított konfiguráció érvénytelen vagy hibás adatokat tartalmaz.",
+                validation);
+        }
+
+        existing.Name = request.Name.Trim();
+        existing.EngineOptionId = request.EngineOptionId!.Value;
+        existing.SelectedOptionIds = new List<int>(request.SelectedOptionIds);
+        existing.SavedTotalPrice = validation.TotalPrice;
+
+        var updated = _repository.Update(existing);
+        return ServiceResult<SavedConfigurationDto>.Success(MapToDtoWithRevalidation(updated), 200);
+    }
+
+    public ServiceResult<bool> DeleteSavedConfiguration(int id, string? currentUserId)
+    {
+        if (string.IsNullOrWhiteSpace(currentUserId))
+        {
+            return ServiceResult<bool>.Failure(401, "Bejelentkezés szükséges a konfiguráció törléséhez (401 Unauthorized).");
+        }
+
+        var existing = _repository.GetById(id);
+        if (existing == null)
+        {
+            return ServiceResult<bool>.Failure(404, "A törölni kívánt konfiguráció nem található.");
+        }
+
+        if (!string.Equals(existing.UserId, currentUserId, StringComparison.Ordinal))
+        {
+            return ServiceResult<bool>.Failure(403, "Nincs jogosultság más felhasználó mentésének törléséhez (403 Forbidden).");
+        }
+
+        _repository.Delete(id);
+        return ServiceResult<bool>.Success(true, 204);
+    }
+
+    public void AddRule(OptionRule rule)
+    {
+        ArgumentNullException.ThrowIfNull(rule);
+        _rules.Add(rule);
+    }
+
+    public void AddPackageDiscount(PackageDiscount discount)
+    {
+        ArgumentNullException.ThrowIfNull(discount);
+        _discounts.Add(discount);
+    }
+
+    public void UpdateOptionPrice(int optionId, decimal newPrice)
+    {
+        var option = _options.FirstOrDefault(o => o.Id == optionId)
+            ?? throw new KeyNotFoundException($"Option #{optionId} not found.");
+        option.Price = newPrice;
+    }
+
+    private SavedConfigurationDto MapToDtoWithRevalidation(SavedConfiguration saved)
+    {
+        // AGENTS.md 6. pont és SPECIFICATION.md 4. pont:
+        // Visszatöltéskor a backend újra-validálja és újraszámolja a konfigurációt,
+        // miközben megőrzi a mentéskori SavedTotalPrice értéket.
+        var currentEval = EvaluateConfiguration(new ConfigurationRequestDto
+        {
+            EngineOptionId = saved.EngineOptionId,
+            SelectedOptionIds = new List<int>(saved.SelectedOptionIds)
+        });
+
+        return new SavedConfigurationDto
+        {
+            Id = saved.Id,
+            Name = saved.Name,
+            UserId = saved.UserId,
+            EngineOptionId = saved.EngineOptionId,
+            SelectedOptionIds = new List<int>(saved.SelectedOptionIds),
+            SavedTotalPrice = saved.SavedTotalPrice,
+            CurrentEvaluation = currentEval
+        };
+    }
+
     protected virtual bool ValidateInput(ConfigurationRequestDto? request, ConfigurationEvaluationResultDto result)
     {
-        if (request == null || !request.EngineOptionId.HasValue)
+        if (request == null)
+        {
+            result.Errors.Add(new ValidationIssueDto
+            {
+                Code = ErrorCodes.NullRequest,
+                Message = "A konfigurációs kérés nem lehet null."
+            });
+            result.HasInvalidInput = true;
+            return false;
+        }
+
+        // 1. Motor ellenőrzése
+        if (!request.EngineOptionId.HasValue)
         {
             result.Errors.Add(new ValidationIssueDto
             {
                 Code = ErrorCodes.MissingEngine,
                 Message = "A motor kiválasztása kötelező."
             });
-            return false;
+            result.HasInvalidInput = true;
         }
-
-        var engineOption = _options.FirstOrDefault(o => o.Id == request.EngineOptionId.Value && o.Category == OptionCategory.Engine);
-        if (engineOption == null)
+        else
         {
-            result.Errors.Add(new ValidationIssueDto
+            var engineOption = _options.FirstOrDefault(o => o.Id == request.EngineOptionId.Value && o.Category == OptionCategory.Engine);
+            if (engineOption == null)
             {
-                Code = ErrorCodes.InvalidEngineId,
-                Message = $"Érvénytelen motor azonosító: {request.EngineOptionId.Value}.",
-                AffectedOptionIds = new List<int> { request.EngineOptionId.Value }
-            });
-            return false;
+                result.Errors.Add(new ValidationIssueDto
+                {
+                    Code = ErrorCodes.InvalidEngineId,
+                    Message = $"Érvénytelen motor azonosító: {request.EngineOptionId.Value}.",
+                    AffectedOptionIds = new List<int> { request.EngineOptionId.Value }
+                });
+                result.HasInvalidInput = true;
+            }
         }
 
+        // 2. Duplikált opciók ellenőrzése (nem lép ki rövidzárral!)
         var selectedIds = request.SelectedOptionIds ?? new List<int>();
         if (selectedIds.Distinct().Count() != selectedIds.Count)
         {
@@ -202,24 +414,58 @@ public class ConfigurationService : IConfigurationService
                 Message = "A kiválasztott opciók között duplikáció található.",
                 AffectedOptionIds = duplicates
             });
-            return false;
+            result.HasInvalidInput = true;
         }
 
-        foreach (var id in selectedIds)
+        // 3. Minden egyes kiválasztott opció létezésének és típusának ellenőrzése (nem lép ki az első hibánál!)
+        var validSelectedOptions = new List<CarOption>();
+        foreach (var id in selectedIds.Distinct())
         {
-            if (!_options.Any(o => o.Id == id && o.Category != OptionCategory.Engine))
+            var option = _options.FirstOrDefault(o => o.Id == id);
+            if (option == null)
             {
                 result.Errors.Add(new ValidationIssueDto
                 {
                     Code = ErrorCodes.InvalidOptionId,
-                    Message = $"Nem létező vagy érvénytelen opció azonosító: {id}.",
+                    Message = $"Nem létező opció azonosító: {id}.",
                     AffectedOptionIds = new List<int> { id }
                 });
-                return false;
+                result.HasInvalidInput = true;
+            }
+            else if (option.Category == OptionCategory.Engine)
+            {
+                result.Errors.Add(new ValidationIssueDto
+                {
+                    Code = ErrorCodes.EngineInSelectedOptions,
+                    Message = $"Motor kategóriájú opció ({option.Name}) nem adható át az extrák/opciók listájában; használd az EngineOptionId mezőt.",
+                    AffectedOptionIds = new List<int> { id }
+                });
+                result.HasInvalidInput = true;
+            }
+            else
+            {
+                validSelectedOptions.Add(option);
             }
         }
 
-        return true;
+        // 4. Egyszeres választású kategóriák (ExteriorColor, Rim, Interior) kardinalitás-ellenőrzése
+        var multiCategoryConflicts = validSelectedOptions
+            .Where(o => SingleChoiceCategories.Contains(o.Category))
+            .GroupBy(o => o.Category)
+            .Where(g => g.Count() > 1);
+
+        foreach (var categoryGroup in multiCategoryConflicts)
+        {
+            result.Errors.Add(new ValidationIssueDto
+            {
+                Code = ErrorCodes.MultipleCategorySelection,
+                Message = $"A(z) {categoryGroup.Key} kategóriából egyszerre legfeljebb egy opció választható.",
+                AffectedOptionIds = categoryGroup.Select(o => o.Id).ToList()
+            });
+            result.HasInvalidInput = true;
+        }
+
+        return result.Errors.Count == 0 && !result.HasInvalidInput;
     }
 
     protected virtual void CheckDependencies(HashSet<int> allSelectedIds, ConfigurationEvaluationResultDto result)
@@ -256,7 +502,7 @@ public class ConfigurationService : IConfigurationService
 
     protected virtual decimal CalculateDiscounts(
         HashSet<int> allSelectedIds,
-        List<CarOption> selectedOptions,
+        List<CarOption> allSelectedOptions,
         ConfigurationEvaluationResultDto result)
     {
         decimal totalDiscount = 0m;
@@ -265,7 +511,7 @@ public class ConfigurationService : IConfigurationService
         {
             if (discount.RequiredOptionIds.All(id => allSelectedIds.Contains(id)))
             {
-                var packageSum = selectedOptions
+                var packageSum = allSelectedOptions
                     .Where(o => discount.RequiredOptionIds.Contains(o.Id))
                     .Sum(o => o.Price);
 

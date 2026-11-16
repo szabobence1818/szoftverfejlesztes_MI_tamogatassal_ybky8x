@@ -68,3 +68,25 @@ public class SavedConfigurationDto
     public decimal SavedTotalPrice { get; set; }
     public ConfigurationEvaluationResultDto? CurrentEvaluation { get; set; }
 }
+
+public class ServiceResult<T>
+{
+    public int StatusCode { get; set; }
+    public bool IsSuccess => StatusCode is >= 200 and < 300;
+    public T? Data { get; set; }
+    public string? ErrorMessage { get; set; }
+    public ConfigurationEvaluationResultDto? ValidationResult { get; set; }
+
+    public static ServiceResult<T> Success(T data, int statusCode = 200) => new()
+    {
+        StatusCode = statusCode,
+        Data = data
+    };
+
+    public static ServiceResult<T> Failure(int statusCode, string errorMessage, ConfigurationEvaluationResultDto? validationResult = null) => new()
+    {
+        StatusCode = statusCode,
+        ErrorMessage = errorMessage,
+        ValidationResult = validationResult
+    };
+}
