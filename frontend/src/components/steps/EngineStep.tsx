@@ -1,0 +1,48 @@
+import React from 'react';
+import { formatHuf, useConfigurator } from '../../context/ConfiguratorContext';
+import { OptionCategory } from '../../types/configurator';
+
+export const EngineStep: React.FC = () => {
+  const { options, engineOptionId, selectEngine } = useConfigurator();
+  const engines = options.filter((o) => o.category === OptionCategory.Engine);
+
+  return (
+    <section className="space-y-4">
+      <div>
+        <h2 className="text-xl font-bold text-slate-900">1. Lépés: Motor kiválasztása</h2>
+        <p className="text-sm text-slate-600 mt-1">
+          Válassza ki a jármű hajtásláncát. Motorcserénél a rendszer megőrzi a korábban kiválasztott
+          extrákat, és azonnal jelzi az esetleges kompatibilitási ütközéseket.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {engines.map((engine) => {
+          const selected = engineOptionId === engine.id;
+          return (
+            <button
+              key={engine.id}
+              type="button"
+              onClick={() => selectEngine(engine.id)}
+              className={`text-left p-4 rounded-xl border-2 transition-all cursor-pointer ${
+                selected
+                  ? 'border-indigo-600 bg-indigo-50/60 shadow-xs'
+                  : 'border-slate-200 bg-white hover:border-slate-300'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-slate-900">{engine.name}</span>
+                <span className="text-xs font-mono px-2 py-0.5 rounded bg-slate-100 text-slate-600">
+                  ID: {engine.id}
+                </span>
+              </div>
+              <div className="text-lg font-extrabold text-indigo-700 mt-2">
+                {formatHuf(engine.price)}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+};

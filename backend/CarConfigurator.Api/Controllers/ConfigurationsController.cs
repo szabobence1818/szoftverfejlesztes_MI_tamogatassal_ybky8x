@@ -83,13 +83,30 @@ public class ConfigurationsController : ControllerBase
             return claimUserId;
         }
 
-        if (Request?.Headers != null &&
-            Request.Headers.TryGetValue("X-User-Id", out var headerValues))
+        if (Request?.Headers != null)
         {
-            var headerUserId = headerValues.FirstOrDefault();
-            if (!string.IsNullOrWhiteSpace(headerUserId))
+            if (Request.Headers.TryGetValue("Authorization", out var authValues))
             {
-                return headerUserId;
+                var authHeader = authValues.FirstOrDefault();
+                const string prefix = "Bearer mock-jwt-token-";
+                if (!string.IsNullOrWhiteSpace(authHeader) &&
+                    authHeader.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    var extractedUser = authHeader.Substring(prefix.Length).Trim();
+                    if (!string.IsNullOrWhiteSpace(extractedUser))
+                    {
+                        return extractedUser;
+                    }
+                }
+            }
+
+            if (Request.Headers.TryGetValue("X-User-Id", out var headerValues))
+            {
+                var headerUserId = headerValues.FirstOrDefault();
+                if (!string.IsNullOrWhiteSpace(headerUserId))
+                {
+                    return headerUserId;
+                }
             }
         }
 

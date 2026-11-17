@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 400" width="800" height="400">
+  <!-- Sport diffúzor és első/oldalsó splitter réteg (z-index: 40) -->
+  <g>
+    <!-- Hátsó karbon sport diffúzor -->
+    <polygon points="95,280 155,280 145,314 85,310" fill="#111827" stroke="#ef4444" stroke-width="3" />
+    <!-- Oldalsó küszöb spoiler -->
+    <rect x="295" y="298" width="215" height="10" rx="3" fill="#111827" stroke="#ef4444" stroke-width="2" />
+    <!-- Első sport splitter -->
+    <polygon points="640,295 710,290 715,308 635,308" fill="#111827" stroke="#ef4444" stroke-width="3" />
+  </g>
+</svg>

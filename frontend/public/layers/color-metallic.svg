@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 400" width="800" height="400">
+  <defs>
+    <linearGradient id="metallicGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#64748b" />
+      <stop offset="50%" stop-color="#94a3b8" />
+      <stop offset="100%" stop-color="#334155" />
+    </linearGradient>
+  </defs>
+  <!-- Metál fényezés réteg (z-index: 20) -->
+  <path d="M115 265 L145 205 L255 140 L485 135 L605 195 L685 225 L695 285 L640 305 L130 305 L105 285 Z
+           M265 152 L225 198 L575 198 L470 148 Z"
+        fill="url(#metallicGrad)" fill-rule="evenodd" fill-opacity="0.9" stroke="#1e293b" stroke-width="2" />
+  <circle cx="235" cy="295" r="56" fill="#0f172a" />
+  <circle cx="575" cy="295" r="56" fill="#0f172a" />
+</svg>

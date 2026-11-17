@@ -545,16 +545,16 @@ public class ConfigurationService : IConfigurationService
         new CarOption { Id = OptionIds.BaseEngine, Code = "ENGINE_BASE", Name = "Alap motor", Category = OptionCategory.Engine, Price = 10_000_000m },
         new CarOption { Id = OptionIds.SportEngine, Code = "ENGINE_SPORT", Name = "Sport motor", Category = OptionCategory.Engine, Price = 13_500_000m },
 
-        new CarOption { Id = OptionIds.BaseWhiteColor, Code = "COLOR_WHITE", Name = "Alap fehér", Category = OptionCategory.ExteriorColor, Price = 0m, LayerImageUrl = "/layers/color-white.svg", ZIndex = 10 },
-        new CarOption { Id = OptionIds.MetallicColor, Code = "COLOR_METALLIC", Name = "Metál szín", Category = OptionCategory.ExteriorColor, Price = 250_000m, LayerImageUrl = "/layers/color-metallic.svg", ZIndex = 10 },
-        new CarOption { Id = OptionIds.FireRedColor, Code = "COLOR_FIRERED", Name = "Tűzpiros", Category = OptionCategory.ExteriorColor, Price = 300_000m, LayerImageUrl = "/layers/color-firered.svg", ZIndex = 10 },
+        new CarOption { Id = OptionIds.BaseWhiteColor, Code = "COLOR_WHITE", Name = "Alap fehér", Category = OptionCategory.ExteriorColor, Price = 0m, LayerImageUrl = "/layers/color-white.svg", ZIndex = 20 },
+        new CarOption { Id = OptionIds.MetallicColor, Code = "COLOR_METALLIC", Name = "Metál szín", Category = OptionCategory.ExteriorColor, Price = 250_000m, LayerImageUrl = "/layers/color-metallic.svg", ZIndex = 20 },
+        new CarOption { Id = OptionIds.FireRedColor, Code = "COLOR_FIRERED", Name = "Tűzpiros", Category = OptionCategory.ExteriorColor, Price = 300_000m, LayerImageUrl = "/layers/color-firered.svg", ZIndex = 20 },
 
         new CarOption { Id = OptionIds.BaseRim17, Code = "RIM_17", Name = "17\" Alap felni", Category = OptionCategory.Rim, Price = 0m, LayerImageUrl = "/layers/rim-17.svg", ZIndex = 30 },
         new CarOption { Id = OptionIds.Rim18, Code = "RIM_18", Name = "18\" felni", Category = OptionCategory.Rim, Price = 350_000m, LayerImageUrl = "/layers/rim-18.svg", ZIndex = 30 },
         new CarOption { Id = OptionIds.SportRim19, Code = "RIM_19_SPORT", Name = "19\" Sport", Category = OptionCategory.Rim, Price = 550_000m, LayerImageUrl = "/layers/rim-19-sport.svg", ZIndex = 30 },
 
-        new CarOption { Id = OptionIds.SportDiffuser, Code = "OPT_DIFFUSER", Name = "Sport diffúzor", Category = OptionCategory.ExteriorOptical, Price = 200_000m, LayerImageUrl = "/layers/opt-diffuser.svg", ZIndex = 20 },
-        new CarOption { Id = OptionIds.TowHook, Code = "OPT_TOWHOOK", Name = "Vonóhorog", Category = OptionCategory.ExteriorOptical, Price = 250_000m, LayerImageUrl = "/layers/opt-towhook.svg", ZIndex = 25 },
+        new CarOption { Id = OptionIds.SportDiffuser, Code = "OPT_DIFFUSER", Name = "Sport diffúzor", Category = OptionCategory.ExteriorOptical, Price = 200_000m, LayerImageUrl = "/layers/opt-diffuser.svg", ZIndex = 40 },
+        new CarOption { Id = OptionIds.TowHook, Code = "OPT_TOWHOOK", Name = "Vonóhorog", Category = OptionCategory.ExteriorOptical, Price = 250_000m, LayerImageUrl = "/layers/opt-towhook.svg", ZIndex = 40 },
 
         new CarOption { Id = OptionIds.FabricInterior, Code = "INT_FABRIC", Name = "Szövet kárpit", Category = OptionCategory.Interior, Price = 0m },
         new CarOption { Id = OptionIds.LeatherInterior, Code = "INT_LEATHER", Name = "Bőr kárpit", Category = OptionCategory.Interior, Price = 450_000m },

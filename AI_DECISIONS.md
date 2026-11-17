@@ -156,3 +156,61 @@ A független Review Agent által a `REVIEW_PROTOCOL.md` és a `SPECIFICATION.md`
 ### 4.3. Elvetett alternatívák
 - **Elvetett alternatíva 1 – Jogosultság-ellenőrzés kizárólag Controller szinten:** Ha a `401`/`403` ellenőrzés csak a Controllerben lenne, akkor a `ConfigurationService` közvetlen hívásakor megkerülhető lenne a védelem. A `ServiceResult<T>`-vel a jogosultsági szabályok a szolgáltatásrétegben és a Controllerben egyaránt kikényszerítettek és tesztelhetők.
 - **Elvetett alternatíva 2 – Mentett konfigurációk visszatöltése újra-validálás nélkül (csak a mentéskori állapot visszaadása):** Sértené a `SPECIFICATION.md` 4. pontját és az `AGENTS.md` 6. pontját; ha időközben változik egy opció ára vagy bekerül egy új kizárási szabály, a felhasználónak visszatöltéskor látnia kell a frissített árat és az esetleges új ütközést.
+
+
+---
+
+## 5. Döntési eset: Frontend (React + TypeScript + Vite + Tailwind CSS) architektúra, 5 lépéses állapotkezelés (`ConfiguratorContext`) és API-integráció
+
+### 5.1. A kiadott feladat / prompt lényege
+Inicializálni kellett a React + TypeScript + Vite + Tailwind CSS frontend projektet (`frontend/`), felépíteni a `SPECIFICATION.md`-ben rögzített 5 lépéses konfigurátor felület vázát (`1. Motor`, `2. Külső`, `3. Belső`, `4. Extrák`, `5. Összegzés`), kialakítani a tiszta állapotkezelést a lépések közötti navigációhoz, az árak valós idejű frissítéséhez és a kiválasztott opciók gyűjtéséhez, valamint előkészíteni a backend REST API hívásokat (opciók lekérése, kiértékelés/validáció, mentés/visszatöltés/törlés). A 2D rétegek (SVG/PNG) dinamikus renderelése és `z-index` megjelenítése egy következő lépésben készül el, így most az adatalapú logikát és a drótvázat kellett megvalósítani.
+
+### 5.2. Meghozott architekturális és technikai döntések (és indoklásuk)
+1. **Központosított React Context API + egyedi hook (`ConfiguratorProvider` és `useConfigurator`) a lépések feletti állapotmegőrzéshez:**
+   - Az 5 lépés (`EngineStep`, `ExteriorStep`, `InteriorStep`, `ExtrasStep`, `SummaryStep`) közös szülő-kontextusban (`ConfiguratorContext.tsx`) tárolja a kiválasztott motor-azonosítót (`engineOptionId`), a kiválasztott opciók listáját (`selectedOptionIds`), az aktuális lépést (`activeStep`) és a backendtől kapott legfrissebb kiértékelést (`evaluation`).
+   - **Miért:** A 7. elfogadási feltétel kifejezetten előírja, hogy fülváltáskor (pl. „Külső” → „Belső” → vissza „Külső”) a kiválasztott opciók, a 2D rétegek (`visualLayers`) és a kalkulált ár nem veszhetnek el. Mivel az állapot a lépés-komponensek felett, a `ConfiguratorProvider`-ben él, a komponensek le- és felcsatolódása (unmount/mount) során az állapot 100%-ban megmarad.
+2. **Kategória-tudatos opcióválasztó függvények és a néma törlés szigorú tilalma kliensoldalon is:**
+   - Három külön mutációs műveletet választottunk szét a Contextben:
+     - `selectEngine(engineId)`: Lecseréli a motort, de **érintetlenül hagyja** a `selectedOptionIds` tömböt (még akkor is, ha pl. a „Sportfutómű” az „Alap motorra” váltás miatt ütközővé válik).
+     - `selectSingleCategoryOption(category, optionId)`: Az egyszeres választású kategóriákban (`ExteriorColor`, `Rim`, `Interior`) az adott kategória korábbi elemét lecseréli az újra, így a kliensoldal alapból sem generál `MULTIPLE_CATEGORY_SELECTION` hibát.
+     - `toggleMultiCategoryOption(optionId)`: A többszörös választású kategóriákban (`ExteriorOptical`, `Extra`) ki/bekapcsolja az adott opciót anélkül, hogy egy ütköző másik opciót (pl. „Sport diffúzor” mellé választott „Vonóhorog”) némán levenne.
+   - **Miért:** Ez garantálja az `AGENTS.md` 6. pontjának és a `SPECIFICATION.md` 4. pontjának teljesülését: az ütközést a backend `POST /api/configurations/evaluate` válasza (`isValid = false`, `errors`) jelzi, amit a jobb oldali előnézeti/árkalkulációs panel (`PreviewPlaceholder`) és az Összegzés fül azonnal megjelenít, miközben letiltja a mentés gombot (`!evaluation?.canSave`).
+3. **Deklaratív, `useEffect`-vezérelt valós idejű backend szinkronizáció és különálló API réteg (`configuratorApi.ts`):**
+   - Minden `engineOptionId` vagy `selectedOptionIds` állapotváltozás automatikusan meghívja az `evaluateConfiguration` végpontot (`POST /api/configurations/evaluate`), így az árkalkuláció, a „Téli csomag” 20%-os kedvezménye és a validáció egyetlen igazságforrásból (Single Source of Truth – a C# `ConfigurationService`-ből) érkezik.
+   - Az API hívások (`fetchAvailableOptions`, `evaluateConfiguration`, `saveConfiguration`, `fetchUserConfigurations`, `fetchSavedConfigurationById`, `updateSavedConfiguration`, `deleteSavedConfiguration`) egy különálló, erősen tipizált `src/api/configuratorApi.ts` modulba kerültek.
+
+### 5.3. Elvetett alternatívák
+- **Elvetett alternatíva 1 – Lokális (`useState`) állapot tárolása az egyes lépés-komponensekben:** Ha a `ExteriorStep` vagy `ExtrasStep` saját lokális state-ben tárolná a választásokat, akkor lépésváltáskor (amikor az `App.tsx` másik lépést renderel) az állapot elveszne, megsértve a 7. elfogadási feltételt.
+- **Elvetett alternatíva 2 – Nehézsúlyú külső state management könyvtár (Redux Toolkit / MobX) bevezetése:** Egy 5 lépéses, jól körülhatárolt tartományú konfigurátorhoz a Redux felesleges boilerplate kódot (slice-ok, store konfiguráció, middleware-ek) jelentene; a React Context API + egyedi hook (`useConfigurator`) külső függőség nélkül, teljes TypeScript típusbiztonsággal biztosítja ugyanazt a funkcionalitást.
+- **Elvetett alternatíva 3 – Árkalkuláció és üzleti szabályok duplikálása TypeScriptben a frontend oldalon:** Ha a frontend maga számolná a Téli csomag kedvezményt és a kizárásokat a backend megkérdezése nélkül, egy későbbi változtatási igénynél (Mérföldkő 3) két helyen kellene módosítani az üzleti logikát, ami inkonzisztenciához vezethetne.
+
+
+---
+
+## 6. Döntési eset: 2D Rétegelt Vizualizáció (`CarPreview`), `z-index` hierarchia, re-renderek elkerülése (`React.memo` + referencia-stabilizálás) és Mock Hitelesítés / Hibakezelés
+
+### 6.1. A kiadott feladat / prompt lényege
+A kliensoldal befejezése a `SPECIFICATION.md` 7. elfogadási feltétele (Vizuális 2D rétegek) és a mentési/jogosultsági funkciók alapján:
+- Dedikált `CarPreview` komponens létrehozása, amely a képernyő jobb oldalán fixen látható marad a fülváltások során is, és fix CSS `z-index` hierarchiával (`alap_karosszéria [z:10] -> fényezés [z:20] -> felnik [z:30] -> optikai_extrák [z:40]`) egymásra helyezi az áttetsző SVG rétegeket.
+- Az Összegzés fülön (`SummaryStep`) a választott opciók és a végső ár listázása, a mentés (`POST /api/configurations`) bekötése, valamint a `IsValid = false`, `400 Bad Request`, `401 Unauthorized` és `403 Forbidden` válaszok egyértelmű hibamegjelenítése.
+- Egyszerű mock bejelentkezés szimuláció a fejlécben (hardcoded felhasználói státuszokkal és Bearer tokenekkel: `mock-jwt-token-user-1`, `mock-jwt-token-user-2`, valamint Vendég mód).
+
+### 6.2. Meghozott technikai és teljesítmény-optimalizálási döntések (és indoklásuk)
+1. **Kétszintű memoizálás (`React.memo`) és tartalmi referencia-stabilizálás (`areLayersEqual`) a felesleges 2D réteg-újrarenderelések elkerülésére:**
+   - **Probléma:** A konfigurátorban minden fülváltás (`activeStep` módosulása: `Motor` → `Külső` → `Belső` → `Extrák` → `Összegzés`), illetve minden belső kárpit vagy kényelmi extra (pl. Ülésfűtés, Nagy navigáció) kiválasztása frissíti a `ConfiguratorContext` állapotát és új `POST /api/configurations/evaluate` választ hoz létre. Ha a 2D előnézet közvetlenül az új `evaluation.visualLayers` tömbreferenciát kapná meg, a böngésző minden fülváltáskor és nem-vizuális extra kattintáskor újra-renderelné a teljes SVG rétegfát.
+   - **Megoldás:**
+     1. A `ConfiguratorContext`-ben bevezettük az `areLayersEqual(prevLayers, nextLayers)` mély összehasonlító függvényt és a `previousLayersRef`-et: a `visualLayers` state referenciája **kizárólag akkor** változik meg, ha a külső rétegek (`optionId`, `zIndex`, `layerImageUrl`) ténylegesen módosultak.
+     2. A `CarPreview.tsx`-ben mind a teljes vászon (`LayeredCarCanvas`), mind az egyes réteg-elemek (`CarLayerImage`) `React.memo`-val burkoltak, a rétegsorrendet pedig `useMemo` számolja.
+   - **Eredmény:** Fülváltáskor (`1. Motor` ↔ `2. Külső` ↔ `3. Belső`) vagy belső/kényelmi extrák ki-be kapcsolásakor a `LayeredCarCanvas` **0 alkalommal** renderelődik újra, külső opció (pl. fényezés) váltásakor pedig csak az érintett `z-index: 20` `CarLayerImage` frissül, a `z:10` alapkarosszéria és a `z:30` felni DOM-eleme érintetlen marad.
+2. **Fix 4-szintű CSS `z-index` réteg-architektúra (`10 → 20 → 30 → 40`) és áttetsző `viewBox="0 0 800 400"` SVG rétegek:**
+   - Az összes SVG réteg (`frontend/public/layers/*.svg`) azonos, `800×400` koordináta-rendszert (`viewBox="0 0 800 400"`) és `position: absolute; inset: 0` elhelyezést használ:
+     - `z-index: 10`: `/layers/base-body.svg` (alap karosszéria kontúr, szélvédők, lámpák, árnyék).
+     - `z-index: 20`: `/layers/color-white.svg`, `color-metallic.svg`, `color-firered.svg` (karosszéria fényezés `fill-rule="evenodd"` ablak-kivágással).
+     - `z-index: 30`: `/layers/rim-17.svg`, `rim-18.svg`, `rim-19-sport.svg` (első és hátsó kerékjáratokhoz igazított felnik).
+     - `z-index: 40`: `/layers/opt-diffuser.svg`, `opt-towhook.svg` (külső optikai elemek).
+3. **Mock JWT Bearer token hitelesítés és közvetlen `400` / `401` / `403` tesztelhetőség a felületen:**
+   - A fejlécben három gyorsváltó gomb (`Vendég mód`, `Mock Belépés: Kovács János [user-1]`, `Mock Belépés: Nagy Anna [user-2]`) állítja be a `UserSession` objektumot és a `Bearer mock-jwt-token-<userId>` fejlécet, amelyet a backend `ConfigurationsController` kiértékel.
+
+### 6.3. Elvetett alternatívák
+- **Elvetett alternatíva 1 – HTML5 `<canvas>` 2D rajzolás (`drawImage` ciklus) a CSS `z-index` DOM rétegek helyett:** A `<canvas>`-ra rajzolásnál minden egyes külső opcióváltáskor törölni (`clearRect`) és újra egymásra kellene rajzolni az összes képet, és elveszne a böngésző natív CSS kompozitáló (`z-index`) optimalizációja, valamint az `AGENTS.md` 4. pontja kifejezetten a CSS `z-index` használatát írja elő.
+- **Elvetett alternatíva 2 – Minden kombinációhoz előre összerenderelt (flat) kép tárolása:** $3 \text{ szín} \times 3 \text{ felni} \times 4 \text{ optikai kombináció} = 36$ külön képfájlt igényelne már most is, ami új opcióknál kombinatorikus robbanáshoz vezetne a $1 + 3 + 3 + 2 = 9$ darab moduláris SVG réteggel szemben.

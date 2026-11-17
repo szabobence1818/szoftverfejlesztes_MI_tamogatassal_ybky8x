@@ -629,17 +629,17 @@ public class ConfigurationServiceTests
     [Fact]
     public void EvaluateConfiguration_VisualLayers_ExcludesInteriorAndExtrasAndOrdersByZIndexAscending()
     {
-        // Arrange – Fordított sorrendben adjuk át a külső rétegeket + belső/extra opciókat
+        // Arrange – Fordított sorrendben adjuk át a külső rétegeket (z:20 fényezés, z:30 felni, z:40 optikai extra) + belső/extra opciókat
         var request = new ConfigurationRequestDto
         {
             EngineOptionId = ConfigurationService.OptionIds.BaseEngine,
             SelectedOptionIds = new List<int>
             {
-                ConfigurationService.OptionIds.SportRim19,        // ZIndex = 30
+                ConfigurationService.OptionIds.SportDiffuser,     // ZIndex = 40 (optikai extra)
                 ConfigurationService.OptionIds.LeatherInterior,   // Nincs 2D réteg
-                ConfigurationService.OptionIds.SportDiffuser,     // ZIndex = 20
+                ConfigurationService.OptionIds.SportRim19,        // ZIndex = 30 (felni)
                 ConfigurationService.OptionIds.LargeNavigation,   // Nincs 2D réteg
-                ConfigurationService.OptionIds.FireRedColor,      // ZIndex = 10
+                ConfigurationService.OptionIds.FireRedColor,      // ZIndex = 20 (fényezés)
                 ConfigurationService.OptionIds.HeatedSeats        // Nincs 2D réteg
             }
         };
@@ -647,16 +647,16 @@ public class ConfigurationServiceTests
         // Act
         var result = _service.EvaluateConfiguration(request);
 
-        // Assert – Csak a 3 külső réteg jelenhet meg, szigorúan ZIndex (10 -> 20 -> 30) sorrendben
+        // Assert – Csak a 3 külső réteg jelenhet meg, szigorúan ZIndex (20 -> 30 -> 40) sorrendben
         Assert.True(result.IsValid);
         Assert.Equal(3, result.VisualLayers.Count);
-        Assert.Equal(new[] { 10, 20, 30 }, result.VisualLayers.Select(l => l.ZIndex).ToArray());
+        Assert.Equal(new[] { 20, 30, 40 }, result.VisualLayers.Select(l => l.ZIndex).ToArray());
         Assert.Equal(
             new[]
             {
                 ConfigurationService.OptionIds.FireRedColor,
-                ConfigurationService.OptionIds.SportDiffuser,
-                ConfigurationService.OptionIds.SportRim19
+                ConfigurationService.OptionIds.SportRim19,
+                ConfigurationService.OptionIds.SportDiffuser
             },
             result.VisualLayers.Select(l => l.OptionId).ToArray());
     }

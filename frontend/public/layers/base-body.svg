@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 400" width="800" height="400">
+  <!-- Árnyék az autó alatt -->
+  <ellipse cx="400" cy="335" rx="310" ry="22" fill="rgba(15, 23, 42, 0.22)" />
+  <!-- Alap alváz kontúr és ablaküvegek (z-index: 10) -->
+  <path d="M115 265 L145 205 L255 140 L485 135 L605 195 L685 225 L695 285 L640 305 L130 305 L105 285 Z"
+        fill="#cbd5e1" stroke="#334155" stroke-width="4" />
+  <!-- Ablakok / szélvédő -->
+  <path d="M265 152 L470 148 L575 198 L225 198 Z"
+        fill="#1e293b" stroke="#475569" stroke-width="3" />
+  <line x1="385" y1="150" x2="375" y2="198" stroke="#cbd5e1" stroke-width="5" />
+  <!-- Fényszórók és hátsó lámpa -->
+  <polygon points="660,222 690,235 685,255 650,248" fill="#fef08a" stroke="#ca8a04" stroke-width="2" />
+  <polygon points="115,225 140,220 135,250 110,250" fill="#ef4444" stroke="#991b1b" stroke-width="2" />
+  <!-- Kerékjáratok -->
+  <circle cx="235" cy="295" r="56" fill="#0f172a" />
+  <circle cx="575" cy="295" r="56" fill="#0f172a" />
+</svg>

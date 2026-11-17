@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 400" width="800" height="400">
+  <!-- 19" Sport felni piros féknyereggel (z-index: 30) -->
+  <g fill="none">
+    <circle cx="235" cy="295" r="50" fill="#090d16" stroke="#1e293b" stroke-width="6" />
+    <path d="M210 275 A28 28 0 0 1 255 275" stroke="#ef4444" stroke-width="8" />
+    <circle cx="235" cy="295" r="38" stroke="#f59e0b" stroke-width="3" />
+    <line x1="235" y1="257" x2="235" y2="333" stroke="#f8fafc" stroke-width="3" />
+    <line x1="197" y1="295" x2="273" y2="295" stroke="#f8fafc" stroke-width="3" />
+    <line x1="208" y1="268" x2="262" y2="322" stroke="#f8fafc" stroke-width="3" />
+    <line x1="262" y1="268" x2="208" y2="322" stroke="#f8fafc" stroke-width="3" />
+    <circle cx="235" cy="295" r="8" fill="#ef4444" />
+
+    <circle cx="575" cy="295" r="50" fill="#090d16" stroke="#1e293b" stroke-width="6" />
+    <path d="M550 275 A28 28 0 0 1 595 275" stroke="#ef4444" stroke-width="8" />
+    <circle cx="575" cy="295" r="38" stroke="#f59e0b" stroke-width="3" />
+    <line x1="575" y1="257" x2="575" y2="333" stroke="#f8fafc" stroke-width="3" />
+    <line x1="537" y1="295" x2="613" y2="295" stroke="#f8fafc" stroke-width="3" />
+    <line x1="548" y1="268" x2="602" y2="322" stroke="#f8fafc" stroke-width="3" />
+    <line x1="602" y1="268" x2="548" y2="322" stroke="#f8fafc" stroke-width="3" />
+    <circle cx="575" cy="295" r="8" fill="#ef4444" />
+  </g>
+</svg>
