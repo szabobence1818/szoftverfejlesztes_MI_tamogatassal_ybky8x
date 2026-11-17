@@ -214,3 +214,89 @@ A kliensoldal befejezése a `SPECIFICATION.md` 7. elfogadási feltétele (Vizuá
 ### 6.3. Elvetett alternatívák
 - **Elvetett alternatíva 1 – HTML5 `<canvas>` 2D rajzolás (`drawImage` ciklus) a CSS `z-index` DOM rétegek helyett:** A `<canvas>`-ra rajzolásnál minden egyes külső opcióváltáskor törölni (`clearRect`) és újra egymásra kellene rajzolni az összes képet, és elveszne a böngésző natív CSS kompozitáló (`z-index`) optimalizációja, valamint az `AGENTS.md` 4. pontja kifejezetten a CSS `z-index` használatát írja elő.
 - **Elvetett alternatíva 2 – Minden kombinációhoz előre összerenderelt (flat) kép tárolása:** $3 \text{ szín} \times 3 \text{ felni} \times 4 \text{ optikai kombináció} = 36$ külön képfájlt igényelne már most is, ami új opcióknál kombinatorikus robbanáshoz vezetne a $1 + 3 + 3 + 2 = 9$ darab moduláris SVG réteggel szemben.
+
+---
+
+## 7. Döntési eset: Független Review Agent Kliensoldali (React/TypeScript Frontend) Kódvizsgálat, UI/UX és Vizuális Réteg Audit (QA)
+
+> **Szerepkör nyilatkozat:** Ezt a teljes körű kliensoldali funkcionális, vizuális (`z-index`) és architekturális kódvizsgálatot a `REVIEW_PROTOCOL.md` előírásai alapján **független Review Agent**-ként végeztem el. A protokoll értelmében a Review Agent forráskódot nem módosít; feladata kizárólag a diagnózis, a kódkritika és a hiányzó UI/UX funkciók tételes rögzítése.
+
+### 7.1. A kiadott feladat / prompt lényege
+A `REVIEW_PROTOCOL.md` alapján független Review Agent szerepben át kellett vizsgálni a teljes React/TypeScript frontend kódbázist (`App.tsx`, `ConfiguratorContext.tsx`, `configuratorApi.ts`, `CarPreview.tsx`, `StepNavigator.tsx`, `EngineStep.tsx`, `ExteriorStep.tsx`, `InteriorStep.tsx`, `ExtrasStep.tsx`, `SummaryStep.tsx` és `types/configurator.ts`) a `SPECIFICATION.md` 1–7. elfogadási feltételei szerint, különös tekintettel a hibamegjelenítésre (`400`/`401`/`403` és `IsValid = false`), a mentés gomb tiltására, a Téli csomag kedvezményre, a `CarPreview` `z-index` és re-render működésére, valamint a TypeScript típusbiztonságra.
+
+---
+
+### 7.2. Elfogadási feltételek (1–7.) kliensoldali teljesülésének auditja
+
+| Vizsgálati szempont (`SPECIFICATION.md`) | Állapot | Review Agent megállapítás |
+|---|---|---|
+| **1–3. Árkalkuláció, Függőség és Kizárás UI kezelése (`IsValid = false`)** | ⚠️ Részben teljesül | A `CarPreview` és a `SummaryStep` megjeleníti a backend `errors` listáját és az árakat, de az érintett opciók (`affectedOptionIds`) nincsenek vizuálisan kiemelve az 1–4. lépések kártyáin, és a `StepNavigator` sem jelzi, melyik lépésben van az ütközés. |
+| **4. Téli csomag kedvezmény (20% / -80 000 Ft) megjelenítése** | ✅ Teljesül (apróbb acoplamiento hibával) | A kedvezmény egyértelműen megjelenik az `ExtrasStep` szekcióban, a `CarPreview` élő kalkulátorában és a `SummaryStep` végösszegénél is, azonban a szövegezésben a `20%` és `80 000 Ft` értékek be vannak égetve. |
+| **5. Mentés gomb tiltása és `400 Bad Request` kezelése** | ⚠️ Részben teljesül | A mentés gomb `!evaluation?.canSave \|\| currentUser.isGuest \|\| isSaving` esetén vizuálisan és funkcionálisan letiltásra kerül, de üres `configName` esetén aktív marad, az `evaluateConfiguration` pedig nem ellenőrzi a `response.ok` státuszt. |
+| **6. Jogosultságkezelés (`401` / `403`) és mentések CRUD műveletei** | ❌ Hiányos | A mentések módosítása (`PUT /api/configurations/{id}`) teljesen kimaradt a Contextből és a UI-ból, a törlés (`DELETE`) és visszatöltés (`GET`) hibái pedig nincsenek elkapva (`try/catch` hiánya) a mentett listában! |
+| **7. Vizuális 2D rétegek (`CarPreview` `z-index` és re-render védelem)** | ⚠️ Részben teljesül | A `React.memo` + `areLayersEqual` megakadályozza a fülváltáskori újrarenderelést, de a két optikai extra (`Sport diffúzor` és `Vonóhorog`) azonos `z-index: 40` értéken osztozik, visszatöltéskor pedig késleltetett a rétegfrissítés. |
+
+---
+
+### 7.3. Tételes kódkritika, logikai hibák és hiányzó UI/UX funkciók
+
+#### A) Funkcionális és UI/UX hiányosságok (1–6. feltétel)
+
+1. **[KRITIKUS FUNKCIONÁLIS HIÁNY] Mentett konfiguráció módosításának (`PUT /api/configurations/{id}`) teljes hiánya a UI-ról és a Contextből:**
+   - **Hely:** `frontend/src/api/configuratorApi.ts` (136–152. sor), `ConfiguratorContext.tsx`, `SummaryStep.tsx`.
+   - **Diagnózis:** A `SPECIFICATION.md` 2. pontja (*„saját mentéseit listázhatja, visszatöltheti, **módosíthatja** és törölheti”*) és 3.6. pontja (*„Más felhasználó mentésének lekérése, **módosítása** vagy törlése `403 Forbidden`”*) kifejezetten előírja a módosítási funkciót. Bár az `updateSavedConfiguration` függvény szerepel a `configuratorApi.ts`-ben, a `ConfiguratorContext.tsx`-be már **nem lett bekötve (importálva sincs)**, és a `SummaryStep.tsx`-en sincs „Betöltött konfiguráció frissítése (PUT)” gomb.
+   - **Javítási javaslat:** `updateCurrentConfiguration(id, name)` metódus bekötése a `ConfiguratorContext`-be, és amikor `loadedConfiguration !== null`, a `SummaryStep`-en felajánlani a meglévő mentés felülírását (`PUT`), valamint a `403 Forbidden` tesztpanel kiegészítése `PUT` és `DELETE` próbahívásokkal.
+
+2. **[KRITIKUS UI/UX HIBA] Kezeletlen Promise-kivételek (Unhandled Promise Rejection) a mentések törlésekor és listából történő visszatöltésekor:**
+   - **Hely:** `SummaryStep.tsx` (313. és 320. sor) és `ConfiguratorContext.tsx` (253–276. sor).
+   - **Diagnózis:** A `SummaryStep.tsx` a mentett konfigurációk listájában így hívja meg az aszinkron műveleteket:
+     - `onClick={() => void loadSavedConfiguration(saved.id)}` (313. sor)
+     - `onClick={() => void removeSavedConfiguration(saved.id)}` (320. sor)
+     Mivel sem a `ConfiguratorContext` (`loadSavedConfiguration`, `removeSavedConfiguration`), sem a `SummaryStep` gomb-eseménykezelője nem tartalmaz `try / catch` blokkot, bármilyen API hiba (`401`, `403`, `404` vagy hálózati hiba) esetén **kezeletlen kivétel (Unhandled Promise Rejection)** keletkezik a konzolon, és a felhasználó **semmilyen hibaüzenetet (`errorMessage`) nem lát a felületen**! Ráadásul sikeres listából való visszatöltéskor a korábban megjelent piros `errorMessage` sem törlődik (`setErrorMessage(null)` hiányzik).
+   - **Javítási javaslat:** Dedikált `handleLoadSaved(id)` és `handleDeleteSaved(id)` eseménykezelők bevezetése a `SummaryStep.tsx`-ben `try / catch` blokkal, amelyek frissítik a `statusMessage` és `errorMessage` állapotokat.
+
+3. **[HIÁNYZÓ UX FUNKCIÓ] Az `affectedOptionIds` figyelmen kívül hagyása az opció-kártyákon és a `StepNavigator`-ban:**
+   - **Hely:** `StepNavigator.tsx` (14–15. sor), `EngineStep.tsx`, `ExteriorStep.tsx`, `ExtrasStep.tsx`.
+   - **Diagnózis:** A backend minden validációs hibában (`ValidationIssueDto.affectedOptionIds`) pontosan megadja, mely opciók okozzák a konfliktust (pl. `[1, 52]` az Alap motor + Sportfutómű kizárásnál, vagy `[51, 50]` a Prémium hangrendszer + Nagy navigáció függőségi hibánál). Ennek ellenére:
+     - A `StepNavigator` kizárólag az `5. Összegzés` fülön jelenít meg piros `!` jelzést (`step.id === 'summary' && evaluation && !evaluation.isValid`), így a felhasználó nem látja a felső sávban, hogy az `1. Motor`, `2. Külső` vagy `4. Extrák` lépésben van-e a feloldandó hiba.
+     - Az egyes lépésekben az ütköző opciók kártyái (pl. `Sportfutómű` vagy `Sport diffúzor` + `Vonóhorog`) nem kapnak piros/figyelmeztető keretet vagy jelvényt.
+   - **Javítási javaslat:** Az `evaluation.errors.flatMap(e => e.affectedOptionIds)` alapján vizuális hibajelzés (piros szegély / badge) megjelenítése az érintett opció-kártyákon és az érintett kategóriákhoz tartozó lépés-füleken a `StepNavigator`-ban.
+
+4. **[LOGIKAI / UX INKONZISZTENCIA] Betöltött mentés (`loadedConfiguration`) elavult (stale) megjelenítése opcióváltás után:**
+   - **Hely:** `ConfiguratorContext.tsx` (186–209. és 253–265. sor), `SummaryStep.tsx` (272–284. sor).
+   - **Diagnózis:** Ha a felhasználó visszatölt egy mentést (`loadedConfiguration`), majd átlép egy másik fülre és módosítja a motort vagy az extrákat, a `SummaryStep` információs sávja továbbra is a betöltéskori `loadedConfiguration.currentEvaluation?.totalPrice` értéket mutatja „Újraszámolt ár”-ként, nem pedig az aktuális `evaluation?.totalPrice`-t (és nem jelzi, hogy a betöltött mentéshez képest módosítás történt). Emellett visszatöltéskor a `configName` mező sem töltődik fel a betöltött konfiguráció nevével.
+   - **Javítási javaslat:** Visszatöltéskor a `configName` előtöltése `loaded.name` értékkel, valamint a `SummaryStep`-en jelezni, ha az aktuális választás eltér a betöltött mentéstől (`isDirty`).
+
+---
+
+#### B) Vizuális követelmények és `CarPreview` `z-index` problémák (7. feltétel)
+
+5. **[Z-INDEX ÜTKÖZÉS] Azonos `z-index: 40` érték a külső optikai elemeken (`Sport diffúzor` és `Vonóhorog`):**
+   - **Hely:** `CarPreview.tsx` (38–41. és 57–64. sor) és `ConfigurationService.cs` (556–557. sor).
+   - **Diagnózis:** Mind a `Sport diffúzor` (`id: 30`), mind a `Vonóhorog` (`id: 31`) `zIndex: 40` értékkel érkezik. Amikor a felhasználó mindkettőt kiválasztja (a 3. elfogadási feltétel szerinti kizárás tesztelésekor), a `LayeredCarCanvas` `sortedLayers` rendezése (`a.zIndex - b.zIndex`) `0`-t ad. Mivel nincs másodlagos rendezési kulcs (`a.optionId - b.optionId`), a két SVG réteg DOM-beli sorrendje (és így az egymást fedő rajzolási sorrendje) attól függ, hogy a felhasználó melyik gombra kattintott először!
+   - **Javítási javaslat:** Determinisztikus másodlagos rendezés (`a.zIndex - b.zIndex || a.optionId - b.optionId`) a `LayeredCarCanvas` `useMemo`-jában, vagy egyedi `z-index` értékek (`40` és `45`) kiosztása az optikai rétegeknek.
+
+6. **[REDUNDÁNS HÁLÓZATI HÍVÁS ÉS KÉSLELTETETT RÉTEGFRISSÍTÉS] A `loadSavedConfiguration` nem frissíti közvetlenül a `visualLayers` állapotot:**
+   - **Hely:** `ConfiguratorContext.tsx` (253–265. sor).
+   - **Diagnózis:** A `GET /api/configurations/{id}` válaszban a backend már visszaküldi a teljes `loaded.currentEvaluation` objektumot (benne a `visualLayers` tömbbel). A `loadSavedConfiguration` azonban csak a `setEvaluation(loaded.currentEvaluation)`-t hívja meg, a `setVisualLayers`-t **nem**! Ehelyett a `setEngineOptionId` és `setSelectedOptionIds` változása miatt a `useEffect` (123. sor) elindít egy **második, teljesen felesleges `POST /api/configurations/evaluate` kérést**, és a 2D előnézet csak ennek a második kérésnek a befejezésekor frissül.
+   - **Javítási javaslat:** A `loadSavedConfiguration`-ben a `loaded.currentEvaluation.visualLayers` alapján azonnal frissíteni kell a `visualLayers` állapotot (és a `previousLayersRef`-et), elkerülve a vizuális fáziskésést.
+
+7. **[VIZUÁLIS UX / VILLOGÁS MEGELŐZÉSE] SVG rétegek előtöltésének (image preloading) hiánya:**
+   - **Hely:** `CarPreview.tsx` (`CarLayerImage`) és `ConfiguratorContext.tsx`.
+   - **Diagnózis:** Bár a `React.memo` és az `areLayersEqual` kiválóan megakadályozza, hogy fülváltáskor (`Motor` → `Külső` → `Belső`) a meglévő `<img>` elemek újra-renderelődjenek, amikor a felhasználó **először** vált egy még nem látott színre (pl. `color-firered.svg`) vagy felnire (`rim-19-sport.svg`), a böngésző csak az API válasz megérkezésekor kezdi el letölteni az új SVG fájlt.
+   - **Javítási javaslat:** Az `options` katalógus betöltésekor (`fetchAvailableOptions` után) az összes `layerImageUrl` háttérbeli előtöltése (`new Image().src = url`), hogy külső opcióváltáskor a rétegcsere 0 ms hálózati késleltetéssel, villogásmentesen történjen.
+
+---
+
+#### C) Architektúra és TypeScript Típusbiztonság
+
+8. **[KRITIKUS HIBAKEZELÉSI ÉS TÍPUSBIZTONSÁGI HIBA] Az `evaluateConfiguration` nem ellenőrzi a `response.ok` státuszt (`configuratorApi.ts` 75–86. sor):**
+   - **Hely:** `frontend/src/api/configuratorApi.ts` (75–86. sor).
+   - **Diagnózis:** Az `evaluateConfiguration` függvényben hiányzik a `if (!response.ok)` ellenőrzés: vakon meghívja a `(await response.json()) as ConfigurationEvaluationResultDto` kifejezést. Ha a backend `500`-as hibát dob, vagy nem elérhető (és a Vite proxy HTML/üres `502` hibával tér vissza), vagy olyan hiba-JSON-t ad vissza, amelyben nincs `errors: []` és `appliedDiscounts: []` tömb, akkor a TypeScript `as` típuskonverzió ellenére a `CarPreview.tsx` (`evaluation.errors.map`) és az `ExtrasStep.tsx` (`evaluation.appliedDiscounts.includes`) **futásidejű `TypeError` kivétellel összeomlik**!
+   - **Javítási javaslat:** A `response.ok` és `response.status === 400` explicit ellenőrzése az `evaluateConfiguration`-ben, valamint defenzív tömb-ellenőrzés (`Array.isArray(payload?.errors)`), mielőtt a visszatérési értéket `ConfigurationEvaluationResultDto`-ként kezelnénk.
+
+9. **[ARCHITEKTURÁLIS CSATOLÁS] Beégetett opció-ID-k, kódok és kedvezmény-értékek a frontend komponensekben:**
+   - **Hely:** `ConfiguratorContext.tsx` (58–59. sor: `DEFAULT_ENGINE_ID = 1`, `DEFAULT_SELECTED_OPTION_IDS = [10, 20, 40]`) és `ExtrasStep.tsx` (5–9., 18., 65., 76. sor: `WINTER_PACKAGE_CODES`, `'Téli csomag'`, `20%`, `80 000 Ft`).
+   - **Diagnózis:** A frontend beégetett szám- és szövegkonstansokkal hivatkozik a backend opcióira és a Téli csomag `80 000 Ft`-os kedvezményére. Ha a backendben változik egy opció ára (és így a 20%-os kedvezmény összege már nem 80 000 Ft lesz), az `ExtrasStep.tsx` fejléce (`-80 000 Ft`) ellentmondásba kerül a `CarPreview` és a `SummaryStep` által mutatott valódi `evaluation.discountAmount` értékkel!
+   - **Javítási javaslat:** Az `ExtrasStep.tsx`-ben a beégetett `-80 000 Ft` helyett dinamikusan a `formatHuf(evaluation.discountAmount)` értéket kell megjeleníteni, amikor a kedvezmény aktív.
+
