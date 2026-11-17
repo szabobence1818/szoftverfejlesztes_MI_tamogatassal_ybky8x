@@ -529,6 +529,7 @@ public class ConfigurationService : IConfigurationService
         return selectedOptions
             .Where(o => !string.IsNullOrWhiteSpace(o.LayerImageUrl) && o.ZIndex.HasValue)
             .OrderBy(o => o.ZIndex!.Value)
+            .ThenBy(o => o.Id)
             .Select(o => new LayerPreviewDto
             {
                 OptionId = o.Id,

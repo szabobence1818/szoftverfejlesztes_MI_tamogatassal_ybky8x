@@ -300,3 +300,32 @@ A `REVIEW_PROTOCOL.md` alapján független Review Agent szerepben át kellett vi
    - **Diagnózis:** A frontend beégetett szám- és szövegkonstansokkal hivatkozik a backend opcióira és a Téli csomag `80 000 Ft`-os kedvezményére. Ha a backendben változik egy opció ára (és így a 20%-os kedvezmény összege már nem 80 000 Ft lesz), az `ExtrasStep.tsx` fejléce (`-80 000 Ft`) ellentmondásba kerül a `CarPreview` és a `SummaryStep` által mutatott valódi `evaluation.discountAmount` értékkel!
    - **Javítási javaslat:** Az `ExtrasStep.tsx`-ben a beégetett `-80 000 Ft` helyett dinamikusan a `formatHuf(evaluation.discountAmount)` értéket kell megjeleníteni, amikor a kedvezmény aktív.
 
+
+---
+
+## 8. Döntési eset: A független Review Agent által feltárt kliensoldali (React/TS) UI/UX, hibakezelési, `z-index` és állapotkezelési problémák javítása (Minőségbiztosítási és Architekturális döntés)
+
+### 8.1. A kiadott feladat / prompt lényege
+A független Review Agent által végzett kliensoldali kódvizsgálat (7. Döntési eset) 9 konkrét funkcionális, UI/UX, vizuális (`z-index`) és TypeScript típusbiztonsági hiányosságot tárt fel. Ezeket a React komponensekben és a `ConfiguratorContext` / `configuratorApi` rétegben teljes körűen javítani kellett, dokumentálva a minőségbiztosítási döntéseket az `AI_DECISIONS.md` naplóban.
+
+### 8.2. Meghozott minőségbiztosítási és architekturális döntések (és indoklásuk)
+1. **Mentett konfigurációk módosításának (`PUT /api/configurations/{id}`) teljes bekötése a Contextbe és az Összegzés fülre (`SummaryStep.tsx`):**
+   - A `ConfiguratorContext` kiegészült az `updateCurrentConfiguration(id, name)` metódussal, a `SummaryStep` pedig a „Mentés újként (POST)” mellett megjeleníti a „`#id` Felülírása (PUT)” gombot, amikor egy mentett konfiguráció be van töltve, valamint a `401`/`403` tesztpanelen külön `GET`, `PUT` és `DELETE` gombokat biztosít.
+   - **Miért:** Ezzel a `SPECIFICATION.md` 2. és 3.6. pontjában előírt teljes CRUD életciklus (mentés, listázás, visszatöltés, **módosítás**, törlés) és a jogosultsági hibák (`401`/`403`) mindhárom műveletre közvetlenül elérhetővé és tesztelhetővé váltak a UI-on.
+2. **Minden aszinkron művelet (`handleLoadSaved`, `handleUpdateLoaded`, `handleDeleteSaved`) védelme `try / catch` hibakezeléssel és állapot-szinkronizáció (`isLoadedConfigDirty`):**
+   - Megszüntettük a kezeletlen Promise-hívásokat (`void loadSavedConfiguration(...)`, `void removeSavedConfiguration(...)`) a mentett konfigurációk listájában; minden művelet törli a korábbi hibaüzenetet, és hiba esetén a központi `role="alert"` sávban jeleníti meg a backend `400`/`401`/`403`/`404` üzenetét.
+   - Visszatöltéskor a `configName` mező automatikusan előtöltődik a betöltött mentés nevével, az `isLoadedConfigDirty` számított tulajdonság pedig egyértelműen jelzi, ha a felhasználó módosított a betöltött állapoton, egymás mellett mutatva a mentéskori, a visszatöltéskori és az aktuális árat.
+3. **Érintett opciók (`affectedOptionIds`) vizuális kiemelése a `StepNavigator`-ban és az összes lépés opció-kártyáin (`EngineStep`, `ExteriorStep`, `InteriorStep`, `ExtrasStep`):**
+   - A `ConfiguratorContext` az `evaluation.errors` tömb `affectedOptionIds` mezőiből felépíti a `conflictingOptionIds` halmazt, és publikálja az `isOptionConflicting`, `getOptionConflictMessages` és `doesStepHaveConflict` segédfüggvényeket.
+   - **Miért:** Így a felső navigációs sávban (`StepNavigator`) azonnal piros `!` jelzést kap az a lépés is (`1. Motor`, `2. Külső` vagy `4. Extrák`), amelyben a feloldandó ütközés vagy hiányzó előfeltétel található, magukon az érintett opció-kártyákon pedig közvetlenül megjelenik a figyelmeztető jelvény és a konkrét hibaüzenet.
+4. **Determinisztikus `z-index` rendezés, redundáns `evaluate` hívás kiküszöbölése (`skipNextEvaluationRef`) és SVG rétegek előtöltése (`preloadLayerImages`):**
+   - A `ConfigurationService.BuildVisualLayers` (`.OrderBy(o => o.ZIndex).ThenBy(o => o.Id)`) és a `CarPreview.tsx` (`a.zIndex - b.zIndex || a.optionId - b.optionId`) másodlagos rendezési kulcsot kapott, így azonos `z-index: 40` mellett is 100%-ban determinisztikus a rétegsorrend, függetlenül a kattintási sorrendtől.
+   - A `loadSavedConfiguration` mostantól közvetlenül átveszi a backend által már újra-validált `loaded.currentEvaluation.visualLayers` listát, és a `skipNextEvaluationRef` segítségével elkerüli a redundáns második `POST /api/configurations/evaluate` hívást.
+   - Az opciók betöltésekor a `preloadLayerImages` előtölti az összes `/layers/*.svg` fájlt a böngésző gyorsítótárába, így az első szín- vagy felniváltás is késleltetés nélkül jelenik meg.
+5. **Defenzív válasz-normalizálás (`normalizeEvaluationResult`) az `evaluateConfiguration`-ben és dinamikus kedvezmény-megjelenítés:**
+   - A `configuratorApi.ts` ellenőrzi a HTTP státuszt (`!response.ok && response.status !== 400`), és a `normalizeEvaluationResult` függvénnyel garantálja, hogy az `errors`, `appliedDiscounts`, `visualLayers` és `selectedOptionIds` mezők minden esetben valódi tömbök legyenek, megelőzve a futásidejű `TypeError` kivételeket.
+   - Az `ExtrasStep.tsx`-ből eltávolítottuk a beégetett `-80 000 Ft` szöveget; a komponens dinamikusan a `formatHuf(evaluation.discountAmount)` értéket jeleníti meg.
+
+### 8.3. Elvetett alternatívák
+- **Elvetett alternatíva 1 – Globális `window.onunhandledrejection` használata a komponens-szintű `try / catch` helyett:** Bár elkapná a kezeletlen Promise-hibákat, nem tudná kontextusfüggően a `SummaryStep` mentési/módosítási űrlapja alatt megjeleníteni a pontos HTTP hibát.
+- **Elvetett alternatíva 2 – Ütköző opciók kártyáinak letiltása (`disabled`) az 1–4. lépésekben:** Ha letiltanánk a kártyákat, nem lehetne tesztelni és bemutatni a 2. és 3. elfogadási feltételt (a függőségi és kizárási ütközés létrejöttét és a backend `IsValid = false` válaszát). A piros/sárga vizuális kiemelés (`affectedOptionIds` alapján) megőrzi a szabad kombinálhatóságot, miközben egyértelműen mutatja a konfliktus helyét és okát.

@@ -41,17 +41,40 @@ function buildAuthHeaders(session: UserSession): HeadersInit {
   return headers;
 }
 
+function normalizeEvaluationResult(raw: unknown): ConfigurationEvaluationResultDto {
+  const obj = (raw && typeof raw === 'object' ? raw : {}) as Partial<ConfigurationEvaluationResultDto>;
+  return {
+    isValid: Boolean(obj.isValid),
+    hasInvalidInput: Boolean(obj.hasInvalidInput),
+    canSave: Boolean(obj.canSave),
+    engineOptionId: typeof obj.engineOptionId === 'number' ? obj.engineOptionId : null,
+    selectedOptionIds: Array.isArray(obj.selectedOptionIds) ? obj.selectedOptionIds : [],
+    basePrice: typeof obj.basePrice === 'number' ? obj.basePrice : 0,
+    optionsPrice: typeof obj.optionsPrice === 'number' ? obj.optionsPrice : 0,
+    discountAmount: typeof obj.discountAmount === 'number' ? obj.discountAmount : 0,
+    totalPrice: typeof obj.totalPrice === 'number' ? obj.totalPrice : 0,
+    appliedDiscounts: Array.isArray(obj.appliedDiscounts) ? obj.appliedDiscounts : [],
+    errors: Array.isArray(obj.errors)
+      ? obj.errors.map((e) => ({
+          code: String(e?.code ?? 'VALIDATION_ERROR'),
+          message: String(e?.message ?? 'Érvénytelen konfiguráció.'),
+          affectedOptionIds: Array.isArray(e?.affectedOptionIds) ? e.affectedOptionIds : [],
+        }))
+      : [],
+    visualLayers: Array.isArray(obj.visualLayers) ? obj.visualLayers : [],
+  };
+}
+
 async function parseErrorResponse(response: Response, fallbackPrefix: string): Promise<never> {
   const payload = await response.json().catch(() => null);
 
   if (payload && Array.isArray(payload.errors) && payload.errors.length > 0) {
-    const combinedMessages = payload.errors
-      .map((e: { message: string }) => e.message)
-      .join(' | ');
+    const normalized = normalizeEvaluationResult(payload);
+    const combinedMessages = normalized.errors.map((e) => e.message).join(' | ');
     throw new ApiHttpError(
       response.status,
       `HTTP ${response.status}: ${combinedMessages}`,
-      payload as ConfigurationEvaluationResultDto
+      normalized
     );
   }
 
@@ -69,7 +92,8 @@ export async function fetchAvailableOptions(): Promise<OptionDto[]> {
     await parseErrorResponse(response, 'Nem sikerült betölteni az opciókat');
   }
 
-  return (await response.json()) as OptionDto[];
+  const data = await response.json();
+  return Array.isArray(data) ? (data as OptionDto[]) : [];
 }
 
 export async function evaluateConfiguration(
@@ -81,8 +105,19 @@ export async function evaluateConfiguration(
     body: JSON.stringify(request),
   });
 
-  const payload = (await response.json()) as ConfigurationEvaluationResultDto;
-  return payload;
+  if (!response.ok && response.status !== 400) {
+    await parseErrorResponse(response, 'Hiba a konfiguráció kiértékelésekor');
+  }
+
+  const payload = await response.json().catch(() => null);
+  if (!payload || typeof payload !== 'object') {
+    throw new ApiHttpError(
+      response.status,
+      `Érvénytelen válasz érkezett a kiértékelési végponttól (HTTP ${response.status}).`
+    );
+  }
+
+  return normalizeEvaluationResult(payload);
 }
 
 export async function saveConfiguration(

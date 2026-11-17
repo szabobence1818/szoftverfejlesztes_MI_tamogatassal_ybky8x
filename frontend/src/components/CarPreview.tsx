@@ -28,15 +28,18 @@ CarLayerImage.displayName = 'CarLayerImage';
  * Fülváltáskor (activeStep változásakor) vagy belső/extra opciók kiválasztásakor
  * NEM renderelődik újra, mivel a visualLayers referenciája változatlan marad.
  *
- * Rétegsorrend (SPECIFICATION.md 7. elfogadási feltétel):
+ * Determinisztikus rétegsorrend (SPECIFICATION.md 7. elfogadási feltétel):
  * - alap_karosszéria [z-index: 10] (/layers/base-body.svg)
  * - fényezés         [z-index: 20] (/layers/color-*.svg)
  * - felnik           [z-index: 30] (/layers/rim-*.svg)
- * - optikai_extrák   [z-index: 40] (/layers/opt-*.svg)
+ * - optikai_extrák   [z-index: 40] (/layers/opt-*.svg, másodlagos kulcs: optionId)
  */
 const LayeredCarCanvas: React.FC<{ layers: LayerPreviewDto[] }> = React.memo(({ layers }) => {
   const sortedLayers = useMemo(
-    () => [...layers].sort((a, b) => a.zIndex - b.zIndex),
+    () =>
+      [...layers].sort(
+        (a, b) => a.zIndex - b.zIndex || a.optionId - b.optionId
+      ),
     [layers]
   );
 
@@ -53,7 +56,7 @@ const LayeredCarCanvas: React.FC<{ layers: LayerPreviewDto[] }> = React.memo(({ 
           zIndex={10}
         />
 
-        {/* Dinamikus külső opciós rétegek (z-index: 20 -> 30 -> 40) */}
+        {/* Dinamikus külső opciós rétegek (z-index: 20 -> 30 -> 40, determinisztikus sorrendben) */}
         {sortedLayers.map((layer) => (
           <CarLayerImage
             key={`${layer.optionId}-${layer.zIndex}`}

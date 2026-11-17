@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { formatHuf, useConfigurator } from '../../context/ConfiguratorContext';
 
 export const SummaryStep: React.FC = () => {
@@ -10,7 +10,9 @@ export const SummaryStep: React.FC = () => {
     currentUser,
     savedConfigurations,
     loadedConfiguration,
+    isLoadedConfigDirty,
     saveCurrentConfiguration,
+    updateCurrentConfiguration,
     loadSavedConfiguration,
     removeSavedConfiguration,
   } = useConfigurator();
@@ -21,8 +23,16 @@ export const SummaryStep: React.FC = () => {
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [probeConfigId, setProbeConfigId] = useState<string>('');
 
+  // Betöltött mentés esetén a név mező automatikus előtöltése (Review Agent #4 javítás)
+  useEffect(() => {
+    if (loadedConfiguration) {
+      setConfigName(loadedConfiguration.name);
+    }
+  }, [loadedConfiguration]);
+
   const selectedEngine = options.find((o) => o.id === engineOptionId);
   const selectedItems = options.filter((o) => selectedOptionIds.includes(o.id));
+  const isNameValid = configName.trim().length > 0;
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,11 +52,10 @@ export const SummaryStep: React.FC = () => {
     try {
       const saved = await saveCurrentConfiguration(configName);
       setStatusMessage(
-        `Sikeres mentés (HTTP 201): „${saved.name}” (ID: #${saved.id}, Mentett ár: ${formatHuf(
+        `Sikeres új mentés (HTTP 201): „${saved.name}” (ID: #${saved.id}, Mentett ár: ${formatHuf(
           saved.savedTotalPrice
         )}).`
       );
-      setConfigName('');
     } catch (err: unknown) {
       setErrorMessage(err instanceof Error ? err.message : 'Hiba történt a mentés során.');
     } finally {
@@ -54,7 +63,57 @@ export const SummaryStep: React.FC = () => {
     }
   };
 
-  // Segédfüggvény a backend POST /api/configurations 400/401 és GET/DELETE 403 válaszainak közvetlen kipróbálásához
+  // Meglévő, betöltött mentés felülírása (PUT /api/configurations/{id})
+  const handleUpdateLoaded = async () => {
+    if (!loadedConfiguration) return;
+    setStatusMessage(null);
+    setErrorMessage(null);
+    setIsSaving(true);
+    try {
+      const updated = await updateCurrentConfiguration(loadedConfiguration.id, configName);
+      setStatusMessage(
+        `Sikeres módosítás (HTTP 200 PUT): „${updated.name}” (ID: #${
+          updated.id
+        }, Új mentett ár: ${formatHuf(updated.savedTotalPrice)}).`
+      );
+    } catch (err: unknown) {
+      setErrorMessage(err instanceof Error ? err.message : 'Hiba történt a módosítás során.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Listából történő visszatöltés try/catch hibakezeléssel (Review Agent #2 javítás)
+  const handleLoadSaved = async (id: number) => {
+    setStatusMessage(null);
+    setErrorMessage(null);
+    try {
+      const loaded = await loadSavedConfiguration(id);
+      setStatusMessage(
+        `Konfiguráció visszatöltve (HTTP 200 GET): „${loaded.name}” (#${loaded.id}).`
+      );
+    } catch (err: unknown) {
+      setErrorMessage(
+        err instanceof Error ? err.message : 'Hiba a mentett konfiguráció visszatöltésekor.'
+      );
+    }
+  };
+
+  // Listából történő törlés try/catch hibakezeléssel (Review Agent #2 javítás)
+  const handleDeleteSaved = async (id: number) => {
+    setStatusMessage(null);
+    setErrorMessage(null);
+    try {
+      await removeSavedConfiguration(id);
+      setStatusMessage(`A(z) #${id} azonosítójú konfiguráció sikeresen törölve (HTTP 204 DELETE).`);
+    } catch (err: unknown) {
+      setErrorMessage(
+        err instanceof Error ? err.message : 'Hiba a mentett konfiguráció törlésekor.'
+      );
+    }
+  };
+
+  // Segédfüggvény a backend POST /api/configurations 400/401 válaszainak közvetlen kipróbálásához
   const handleForceBackendPost = async () => {
     setStatusMessage(null);
     setErrorMessage(null);
@@ -66,7 +125,6 @@ export const SummaryStep: React.FC = () => {
           saved.savedTotalPrice
         )}).`
       );
-      setConfigName('');
     } catch (err: unknown) {
       setErrorMessage(err instanceof Error ? err.message : 'Backend hiba.');
     } finally {
@@ -74,21 +132,46 @@ export const SummaryStep: React.FC = () => {
     }
   };
 
-  const handleLoadByIdProbe = async () => {
-    setStatusMessage(null);
-    setErrorMessage(null);
+  // Segédfüggvények a 6. elfogadási feltétel (401/403 GET, PUT, DELETE) közvetlen teszteléséhez
+  const parseProbeId = (): number | null => {
     const idNum = Number(probeConfigId);
     if (!Number.isInteger(idNum) || idNum <= 0) {
       setErrorMessage('Kérjük, adjon meg egy pozitív egész konfiguráció-azonosítót (pl. 1).');
-      return;
+      return null;
     }
+    return idNum;
+  };
 
+  const handleProbeGet = async () => {
+    setStatusMessage(null);
+    setErrorMessage(null);
+    const idNum = parseProbeId();
+    if (idNum === null) return;
+    await handleLoadSaved(idNum);
+  };
+
+  const handleProbePut = async () => {
+    setStatusMessage(null);
+    setErrorMessage(null);
+    const idNum = parseProbeId();
+    if (idNum === null) return;
     try {
-      const loaded = await loadSavedConfiguration(idNum);
-      setStatusMessage(`Sikeresen betöltve: „${loaded.name}” (#${loaded.id}).`);
+      const updated = await updateCurrentConfiguration(
+        idNum,
+        configName.trim() || 'Módosított név'
+      );
+      setStatusMessage(`Sikeres módosítás (HTTP 200 PUT): „${updated.name}” (#${updated.id}).`);
     } catch (err: unknown) {
-      setErrorMessage(err instanceof Error ? err.message : 'Hiba a konfiguráció betöltésekor.');
+      setErrorMessage(err instanceof Error ? err.message : 'Hiba a módosítási próbahívás során.');
     }
+  };
+
+  const handleProbeDelete = async () => {
+    setStatusMessage(null);
+    setErrorMessage(null);
+    const idNum = parseProbeId();
+    if (idNum === null) return;
+    await handleDeleteSaved(idNum);
   };
 
   return (
@@ -98,9 +181,9 @@ export const SummaryStep: React.FC = () => {
         <p className="text-sm text-slate-600 mt-1">
           Tekintse át a kiválasztott opciókat és a végső árat. A konfiguráció a backend{' '}
           <code className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded">
-            POST /api/configurations
+            POST / PUT / DELETE /api/configurations
           </code>{' '}
-          végpontján keresztül menthető el.
+          végpontjain keresztül kezelhető.
         </p>
       </div>
 
@@ -111,7 +194,9 @@ export const SummaryStep: React.FC = () => {
           className="rounded-xl bg-red-50 border-2 border-red-300 p-4 space-y-2 text-red-900"
         >
           <div className="text-sm font-extrabold flex items-center gap-2">
-            <span>⛔ A konfiguráció jelenleg érvénytelen (`IsValid = false`) – a mentés tiltott!</span>
+            <span>
+              ⛔ A konfiguráció jelenleg érvénytelen (`IsValid = false`) – a mentés tiltott!
+            </span>
           </div>
           <ul className="list-disc list-inside text-xs text-red-800 space-y-1">
             {evaluation.errors.map((err, index) => (
@@ -174,10 +259,12 @@ export const SummaryStep: React.FC = () => {
         )}
       </div>
 
-      {/* Mentési űrlap és hibakezelés */}
+      {/* Mentési és Módosítási (POST / PUT) űrlap */}
       <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-bold text-slate-800">Konfiguráció mentése</h3>
+          <h3 className="text-sm font-bold text-slate-800">
+            Konfiguráció mentése (POST) / Módosítása (PUT)
+          </h3>
           <span className="text-xs font-mono px-2 py-0.5 rounded bg-slate-100 text-slate-600">
             Aktív státusz: {currentUser.displayName}
           </span>
@@ -194,15 +281,30 @@ export const SummaryStep: React.FC = () => {
             />
             <button
               type="submit"
-              disabled={!evaluation?.canSave || currentUser.isGuest || isSaving}
-              className={`px-5 py-2 rounded-lg text-sm font-bold transition-all ${
-                evaluation?.canSave && !currentUser.isGuest && !isSaving
+              disabled={!evaluation?.canSave || !isNameValid || currentUser.isGuest || isSaving}
+              className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+                evaluation?.canSave && isNameValid && !currentUser.isGuest && !isSaving
                   ? 'bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer'
                   : 'bg-slate-200 text-slate-500 cursor-not-allowed'
               }`}
             >
-              {isSaving ? 'Mentés folyamatban...' : 'Konfiguráció mentése'}
+              {isSaving ? 'Mentés...' : 'Mentés újként (POST)'}
             </button>
+
+            {loadedConfiguration && !currentUser.isGuest && (
+              <button
+                type="button"
+                onClick={() => void handleUpdateLoaded()}
+                disabled={!evaluation?.canSave || !isNameValid || isSaving}
+                className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+                  evaluation?.canSave && isNameValid && !isSaving
+                    ? 'bg-emerald-600 text-white hover:bg-emerald-700 cursor-pointer'
+                    : 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                }`}
+              >
+                #{loadedConfiguration.id} Felülírása (PUT)
+              </button>
+            )}
           </div>
 
           {/* Tesztelő gomb a backend 400 Bad Request / 401 Unauthorized válaszainak közvetlen kipróbálásához */}
@@ -223,7 +325,7 @@ export const SummaryStep: React.FC = () => {
           </div>
         </form>
 
-        {/* Sikeres mentés visszajelzés */}
+        {/* Sikeres művelet visszajelzés */}
         {statusMessage && (
           <div
             role="status"
@@ -244,42 +346,70 @@ export const SummaryStep: React.FC = () => {
         )}
       </div>
 
-      {/* Saját mentések listája + Más felhasználó mentésének (403 Forbidden) tesztelése */}
+      {/* Saját mentések listája + Más felhasználó mentésének (403 Forbidden GET/PUT/DELETE) tesztelése */}
       <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-bold text-slate-800">
-            Mentett konfigurációk kezelése és visszatöltése
+            Mentett konfigurációk kezelése (GET / PUT / DELETE)
           </h3>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
             <input
               type="number"
               min={1}
               value={probeConfigId}
               onChange={(e) => setProbeConfigId(e.target.value)}
               placeholder="Konfig ID (pl. 1)"
-              className="w-32 rounded border border-slate-300 px-2.5 py-1 text-xs"
+              className="w-28 rounded border border-slate-300 px-2.5 py-1 text-xs"
             />
             <button
               type="button"
-              onClick={() => void handleLoadByIdProbe()}
-              className="text-xs px-3 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold cursor-pointer"
+              onClick={() => void handleProbeGet()}
+              className="text-xs px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold cursor-pointer"
             >
-              ID lekérése (401/403 teszt)
+              GET (401/403)
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleProbePut()}
+              className="text-xs px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold cursor-pointer"
+            >
+              PUT (401/403)
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleProbeDelete()}
+              className="text-xs px-2.5 py-1 rounded bg-red-50 hover:bg-red-100 text-red-800 font-semibold cursor-pointer"
+            >
+              DELETE (401/403)
             </button>
           </div>
         </div>
 
         {loadedConfiguration && (
-          <div className="text-xs bg-indigo-50 border border-indigo-200 text-indigo-900 rounded-lg p-2.5">
-            Betöltött mentés: <strong>{loadedConfiguration.name}</strong> (#{loadedConfiguration.id})
-            | Mentéskori ár: <strong>{formatHuf(loadedConfiguration.savedTotalPrice)}</strong> |
-            Újraszámolt ár:{' '}
-            <strong>
-              {formatHuf(
-                loadedConfiguration.currentEvaluation?.totalPrice ??
-                  loadedConfiguration.savedTotalPrice
-              )}
-            </strong>
+          <div className="text-xs bg-indigo-50 border border-indigo-200 text-indigo-900 rounded-lg p-3 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              Betöltött mentés: <strong>{loadedConfiguration.name}</strong> (#
+              {loadedConfiguration.id}) | Mentéskori ár:{' '}
+              <strong>{formatHuf(loadedConfiguration.savedTotalPrice)}</strong> | Visszatöltéskori
+              ár:{' '}
+              <strong>
+                {formatHuf(
+                  loadedConfiguration.currentEvaluation?.totalPrice ??
+                    loadedConfiguration.savedTotalPrice
+                )}
+              </strong>{' '}
+              | Jelenlegi ár:{' '}
+              <strong>{formatHuf(evaluation?.totalPrice ?? loadedConfiguration.savedTotalPrice)}</strong>
+            </div>
+            <span
+              className={`px-2 py-0.5 rounded font-bold text-[11px] ${
+                isLoadedConfigDirty
+                  ? 'bg-amber-200 text-amber-900'
+                  : 'bg-emerald-200 text-emerald-900'
+              }`}
+            >
+              {isLoadedConfigDirty ? 'Módosítva a betöltés óta' : 'Mentett állapot'}
+            </span>
           </div>
         )}
 
@@ -310,14 +440,14 @@ export const SummaryStep: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => void loadSavedConfiguration(saved.id)}
+                    onClick={() => void handleLoadSaved(saved.id)}
                     className="text-xs px-3 py-1 rounded bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-semibold cursor-pointer"
                   >
                     Visszatöltés
                   </button>
                   <button
                     type="button"
-                    onClick={() => void removeSavedConfiguration(saved.id)}
+                    onClick={() => void handleDeleteSaved(saved.id)}
                     className="text-xs px-3 py-1 rounded bg-red-50 text-red-700 hover:bg-red-100 font-semibold cursor-pointer"
                   >
                     Törlés

@@ -6,6 +6,7 @@ import {
   fetchSavedConfigurationById,
   fetchUserConfigurations,
   saveConfiguration,
+  updateSavedConfiguration,
 } from '../api/configuratorApi';
 import {
   CONFIGURATOR_STEPS,
@@ -35,19 +36,24 @@ interface ConfiguratorContextValue {
   isEvaluating: boolean;
   apiError: string | null;
 
-  // Opcióválasztó műveletek (Néma törlés nélkül!)
+  // Opcióválasztó műveletek (Néma törlés nélkül!) és ütközés-lekérdezők
   selectEngine: (engineId: number) => void;
   selectSingleCategoryOption: (category: OptionCategory, optionId: number) => void;
   toggleMultiCategoryOption: (optionId: number) => void;
   isOptionSelected: (optionId: number) => boolean;
+  isOptionConflicting: (optionId: number) => boolean;
+  getOptionConflictMessages: (optionId: number) => string[];
+  doesStepHaveConflict: (stepId: ConfiguratorStepId) => boolean;
 
-  // Mock Bejelentkezés szimuláció (Vendég vs. Bejelentkezett felhasználó tokennel) és mentések
+  // Mock Bejelentkezés szimuláció (Vendég vs. Bejelentkezett felhasználó tokennel) és mentések CRUD
   currentUser: UserSession;
   loginAsMockUser: (userId: string, displayName: string) => void;
   logoutToGuest: () => void;
   savedConfigurations: SavedConfigurationDto[];
   loadedConfiguration: SavedConfigurationDto | null;
+  isLoadedConfigDirty: boolean;
   saveCurrentConfiguration: (name: string) => Promise<SavedConfigurationDto>;
+  updateCurrentConfiguration: (id: number, name: string) => Promise<SavedConfigurationDto>;
   loadSavedConfiguration: (id: number) => Promise<SavedConfigurationDto>;
   removeSavedConfiguration: (id: number) => Promise<void>;
   refreshSavedConfigurations: () => Promise<void>;
@@ -55,8 +61,8 @@ interface ConfiguratorContextValue {
 
 const ConfiguratorContext = createContext<ConfiguratorContextValue | undefined>(undefined);
 
-const DEFAULT_ENGINE_ID = 1; // Alap motor (10 000 000 Ft)
-const DEFAULT_SELECTED_OPTION_IDS = [10, 20, 40]; // Alap fehér szín (z:20), 17" Alap felni (z:30), Szövet kárpit
+const FALLBACK_ENGINE_ID = 1;
+const FALLBACK_SELECTED_OPTION_IDS = [10, 20, 40];
 
 function areLayersEqual(a: LayerPreviewDto[], b: LayerPreviewDto[]): boolean {
   if (a.length !== b.length) return false;
@@ -72,14 +78,29 @@ function areLayersEqual(a: LayerPreviewDto[], b: LayerPreviewDto[]): boolean {
   return true;
 }
 
+function preloadLayerImages(loadedOptions: OptionDto[]): void {
+  if (typeof window === 'undefined' || typeof Image === 'undefined') return;
+  const urls = new Set<string>(['/layers/base-body.svg']);
+  for (const opt of loadedOptions) {
+    if (opt.layerImageUrl) {
+      urls.add(opt.layerImageUrl);
+    }
+  }
+  urls.forEach((url) => {
+    const img = new Image();
+    img.src = url;
+  });
+}
+
 export const ConfiguratorProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [activeStep, setActiveStep] = useState<ConfiguratorStepId>('engine');
   const [options, setOptions] = useState<OptionDto[]>([]);
-  const [engineOptionId, setEngineOptionId] = useState<number | null>(DEFAULT_ENGINE_ID);
-  const [selectedOptionIds, setSelectedOptionIds] = useState<number[]>(DEFAULT_SELECTED_OPTION_IDS);
+  const [engineOptionId, setEngineOptionId] = useState<number | null>(FALLBACK_ENGINE_ID);
+  const [selectedOptionIds, setSelectedOptionIds] = useState<number[]>(FALLBACK_SELECTED_OPTION_IDS);
   const [evaluation, setEvaluation] = useState<ConfigurationEvaluationResultDto | null>(null);
   const [visualLayers, setVisualLayers] = useState<LayerPreviewDto[]>([]);
   const previousLayersRef = useRef<LayerPreviewDto[]>([]);
+  const skipNextEvaluationRef = useRef<boolean>(false);
 
   const [isLoadingOptions, setIsLoadingOptions] = useState<boolean>(true);
   const [isEvaluating, setIsEvaluating] = useState<boolean>(false);
@@ -95,7 +116,14 @@ export const ConfiguratorProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [savedConfigurations, setSavedConfigurations] = useState<SavedConfigurationDto[]>([]);
   const [loadedConfiguration, setLoadedConfiguration] = useState<SavedConfigurationDto | null>(null);
 
-  // 1. Elérhető opciók betöltése induláskor
+  const applyVisualLayersIfChanged = useCallback((nextLayers: LayerPreviewDto[]) => {
+    if (!areLayersEqual(previousLayersRef.current, nextLayers)) {
+      previousLayersRef.current = nextLayers;
+      setVisualLayers(nextLayers);
+    }
+  }, []);
+
+  // 1. Elérhető opciók betöltése induláskor + 2D SVG rétegek háttérbeli előtöltése (preload)
   useEffect(() => {
     let isMounted = true;
     setIsLoadingOptions(true);
@@ -103,6 +131,7 @@ export const ConfiguratorProvider: React.FC<{ children: React.ReactNode }> = ({ 
       .then((loadedOptions) => {
         if (!isMounted) return;
         setOptions(loadedOptions);
+        preloadLayerImages(loadedOptions);
         setApiError(null);
       })
       .catch((err: unknown) => {
@@ -119,8 +148,12 @@ export const ConfiguratorProvider: React.FC<{ children: React.ReactNode }> = ({ 
   }, []);
 
   // 2. Valós idejű árkalkuláció és validáció minden opcióváltáskor
-  // Referencia-stabilitás: a visualLayers tömb referenciája csak akkor frissül, ha a külső 2D rétegek ténylegesen változtak!
   useEffect(() => {
+    if (skipNextEvaluationRef.current) {
+      skipNextEvaluationRef.current = false;
+      return;
+    }
+
     let isMounted = true;
     setIsEvaluating(true);
 
@@ -131,11 +164,7 @@ export const ConfiguratorProvider: React.FC<{ children: React.ReactNode }> = ({ 
       .then((evalResult) => {
         if (!isMounted) return;
         setEvaluation(evalResult);
-        const nextLayers = evalResult.visualLayers ?? [];
-        if (!areLayersEqual(previousLayersRef.current, nextLayers)) {
-          previousLayersRef.current = nextLayers;
-          setVisualLayers(nextLayers);
-        }
+        applyVisualLayersIfChanged(evalResult.visualLayers ?? []);
         setApiError(null);
       })
       .catch((err: unknown) => {
@@ -149,7 +178,7 @@ export const ConfiguratorProvider: React.FC<{ children: React.ReactNode }> = ({ 
     return () => {
       isMounted = false;
     };
-  }, [engineOptionId, selectedOptionIds]);
+  }, [engineOptionId, selectedOptionIds, applyVisualLayersIfChanged]);
 
   const refreshSavedConfigurations = useCallback(async () => {
     if (currentUser.isGuest || !currentUser.userId) {
@@ -213,6 +242,68 @@ export const ConfiguratorProvider: React.FC<{ children: React.ReactNode }> = ({ 
     [engineOptionId, selectedOptionIds]
   );
 
+  // Ütköző opciók (affectedOptionIds) követése a kártyák és a StepNavigator vizuális jelöléséhez
+  const conflictingOptionIds = useMemo(() => {
+    const set = new Set<number>();
+    if (!evaluation || evaluation.isValid) return set;
+    for (const err of evaluation.errors) {
+      for (const id of err.affectedOptionIds) {
+        set.add(id);
+      }
+    }
+    return set;
+  }, [evaluation]);
+
+  const isOptionConflicting = useCallback(
+    (optionId: number) => conflictingOptionIds.has(optionId),
+    [conflictingOptionIds]
+  );
+
+  const getOptionConflictMessages = useCallback(
+    (optionId: number): string[] => {
+      if (!evaluation || evaluation.isValid) return [];
+      return evaluation.errors
+        .filter((err) => err.affectedOptionIds.includes(optionId))
+        .map((err) => err.message);
+    },
+    [evaluation]
+  );
+
+  const doesStepHaveConflict = useCallback(
+    (stepId: ConfiguratorStepId): boolean => {
+      if (!evaluation || evaluation.isValid) return false;
+      if (stepId === 'summary') return true;
+
+      for (const opt of options) {
+        if (!conflictingOptionIds.has(opt.id)) continue;
+        if (stepId === 'engine' && opt.category === OptionCategory.Engine) return true;
+        if (
+          stepId === 'exterior' &&
+          (opt.category === OptionCategory.ExteriorColor ||
+            opt.category === OptionCategory.Rim ||
+            opt.category === OptionCategory.ExteriorOptical)
+        ) {
+          return true;
+        }
+        if (stepId === 'interior' && opt.category === OptionCategory.Interior) return true;
+        if (stepId === 'extras' && opt.category === OptionCategory.Extra) return true;
+      }
+
+      return false;
+    },
+    [evaluation, options, conflictingOptionIds]
+  );
+
+  // Jelzi, ha a visszatöltött mentéshez képest a felhasználó módosított bármilyen opciót
+  const isLoadedConfigDirty = useMemo(() => {
+    if (!loadedConfiguration) return false;
+    if (loadedConfiguration.engineOptionId !== engineOptionId) return true;
+    const a = [...loadedConfiguration.selectedOptionIds].sort((x, y) => x - y);
+    const b = [...selectedOptionIds].sort((x, y) => x - y);
+    if (a.length !== b.length) return true;
+    return a.some((val, idx) => val !== b[idx]);
+  }, [loadedConfiguration, engineOptionId, selectedOptionIds]);
+
   const loginAsMockUser = useCallback((userId: string, displayName: string) => {
     setCurrentUser({
       userId,
@@ -250,18 +341,44 @@ export const ConfiguratorProvider: React.FC<{ children: React.ReactNode }> = ({ 
     [engineOptionId, selectedOptionIds, currentUser, refreshSavedConfigurations]
   );
 
+  const updateCurrentConfiguration = useCallback(
+    async (id: number, name: string): Promise<SavedConfigurationDto> => {
+      const updated = await updateSavedConfiguration(
+        id,
+        {
+          name,
+          engineOptionId,
+          selectedOptionIds,
+        },
+        currentUser
+      );
+      setLoadedConfiguration(updated);
+      if (updated.currentEvaluation) {
+        setEvaluation(updated.currentEvaluation);
+        applyVisualLayersIfChanged(updated.currentEvaluation.visualLayers ?? []);
+      }
+      await refreshSavedConfigurations();
+      return updated;
+    },
+    [engineOptionId, selectedOptionIds, currentUser, refreshSavedConfigurations, applyVisualLayersIfChanged]
+  );
+
   const loadSavedConfiguration = useCallback(
     async (id: number): Promise<SavedConfigurationDto> => {
       const loaded = await fetchSavedConfigurationById(id, currentUser);
       setLoadedConfiguration(loaded);
+
+      if (loaded.currentEvaluation) {
+        skipNextEvaluationRef.current = true;
+        setEvaluation(loaded.currentEvaluation);
+        applyVisualLayersIfChanged(loaded.currentEvaluation.visualLayers ?? []);
+      }
+
       setEngineOptionId(loaded.engineOptionId);
       setSelectedOptionIds(loaded.selectedOptionIds);
-      if (loaded.currentEvaluation) {
-        setEvaluation(loaded.currentEvaluation);
-      }
       return loaded;
     },
-    [currentUser]
+    [currentUser, applyVisualLayersIfChanged]
   );
 
   const removeSavedConfiguration = useCallback(
@@ -293,12 +410,17 @@ export const ConfiguratorProvider: React.FC<{ children: React.ReactNode }> = ({ 
       selectSingleCategoryOption,
       toggleMultiCategoryOption,
       isOptionSelected,
+      isOptionConflicting,
+      getOptionConflictMessages,
+      doesStepHaveConflict,
       currentUser,
       loginAsMockUser,
       logoutToGuest,
       savedConfigurations,
       loadedConfiguration,
+      isLoadedConfigDirty,
       saveCurrentConfiguration,
+      updateCurrentConfiguration,
       loadSavedConfiguration,
       removeSavedConfiguration,
       refreshSavedConfigurations,
@@ -319,12 +441,17 @@ export const ConfiguratorProvider: React.FC<{ children: React.ReactNode }> = ({ 
       selectSingleCategoryOption,
       toggleMultiCategoryOption,
       isOptionSelected,
+      isOptionConflicting,
+      getOptionConflictMessages,
+      doesStepHaveConflict,
       currentUser,
       loginAsMockUser,
       logoutToGuest,
       savedConfigurations,
       loadedConfiguration,
+      isLoadedConfigDirty,
       saveCurrentConfiguration,
+      updateCurrentConfiguration,
       loadSavedConfiguration,
       removeSavedConfiguration,
       refreshSavedConfigurations,

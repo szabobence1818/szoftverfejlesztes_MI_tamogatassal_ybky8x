@@ -3,7 +3,8 @@ import { formatHuf, useConfigurator } from '../../context/ConfiguratorContext';
 import { OptionCategory } from '../../types/configurator';
 
 export const InteriorStep: React.FC = () => {
-  const { options, isOptionSelected, selectSingleCategoryOption } = useConfigurator();
+  const { options, isOptionSelected, isOptionConflicting, selectSingleCategoryOption } =
+    useConfigurator();
   const interiors = options.filter((o) => o.category === OptionCategory.Interior);
 
   return (
@@ -18,13 +19,16 @@ export const InteriorStep: React.FC = () => {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {interiors.map((item) => {
           const selected = isOptionSelected(item.id);
+          const hasConflict = isOptionConflicting(item.id);
           return (
             <button
               key={item.id}
               type="button"
               onClick={() => selectSingleCategoryOption(OptionCategory.Interior, item.id)}
               className={`text-left p-4 rounded-xl border-2 transition-all cursor-pointer ${
-                selected
+                selected && hasConflict
+                  ? 'border-red-500 bg-red-50/70'
+                  : selected
                   ? 'border-indigo-600 bg-indigo-50/60'
                   : 'border-slate-200 bg-white hover:border-slate-300'
               }`}
