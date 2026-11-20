@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 400" width="800" height="400">
+  <!-- Vonóhorog réteg (z-index: 40) -->
+  <g>
+    <path d="M108 292 L72 292 L72 268" fill="none" stroke="#334155" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="72" cy="262" r="11" fill="#475569" stroke="#0f172a" stroke-width="3" />
+  </g>
+</svg>

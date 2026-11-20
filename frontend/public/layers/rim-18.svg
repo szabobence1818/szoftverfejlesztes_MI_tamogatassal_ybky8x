@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 400" width="800" height="400">
+  <!-- 18" Felni réteg (z-index: 30) -->
+  <g stroke="#e2e8f0" stroke-width="4" fill="none">
+    <circle cx="235" cy="295" r="48" fill="#0f172a" stroke="#1e293b" stroke-width="7" />
+    <circle cx="235" cy="295" r="34" stroke="#93c5fd" stroke-width="4" />
+    <line x1="235" y1="261" x2="235" y2="329" />
+    <line x1="201" y1="295" x2="269" y2="295" />
+    <line x1="211" y1="271" x2="259" y2="319" />
+    <line x1="259" y1="271" x2="211" y2="319" />
+
+    <circle cx="575" cy="295" r="48" fill="#0f172a" stroke="#1e293b" stroke-width="7" />
+    <circle cx="575" cy="295" r="34" stroke="#93c5fd" stroke-width="4" />
+    <line x1="575" y1="261" x2="575" y2="329" />
+    <line x1="541" y1="295" x2="609" y2="295" />
+    <line x1="551" y1="271" x2="599" y2="319" />
+    <line x1="599" y1="271" x2="551" y2="319" />
+  </g>
+</svg>
